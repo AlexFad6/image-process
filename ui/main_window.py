@@ -92,9 +92,9 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self,
             "关于 image-process",
-            "图像灰度变换工具\n版本：1.0.0\n\n"
+            "图像处理工具\n版本：1.0.0\n\n"
             "GitHub：https://github.com/AlexFad6/image-process\n"
-            "作者：AlexFad6",
+            "作者：AlexFad",
         )
 
     def open_image(self) -> None:

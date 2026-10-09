@@ -1,4 +1,4 @@
-# Python 图像灰度变换
+# Python 图像处理工具
 
 ## 运行
 
@@ -16,10 +16,5 @@ python main.py
 右侧显示尺寸、灰度统计和直方图；“撤销/暂存”保存最近变换，支持单张 PNG/JPEG 保存及
 多图序列导出。序列输出目录会生成 `export_log.json`（含参数、输入输出和成功状态）。
 
-## 验证
-
-```powershell
-python -m compileall main.py core ui
-```
 
 路径由 Qt 对话框处理，内部统一使用 `pathlib.Path`，适用于 Windows 路径。
