@@ -19,7 +19,7 @@ class ImagePanel(QGroupBox):
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.addStretch()
         self.convert_gray = QPushButton("转为灰度")
-        self.convert_gray.setToolTip("将当前图像转换为单通道灰度图")
+        self.convert_gray.setToolTip("将RGB图像转换为灰度图像")
         self.convert_gray.clicked.connect(self.convertToGrayRequested.emit)
         top_layout.addWidget(self.convert_gray)
         outer.addWidget(top_bar)
