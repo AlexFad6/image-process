@@ -1,4 +1,4 @@
-"""Entry point for the grayscale transform workstation."""
+"""Entry point for the application."""
 from __future__ import annotations
 
 import sys
@@ -9,7 +9,7 @@ from ui.main_window import MainWindow
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName("Image Gray Transform")
+    app.setApplicationName("image-process")
     window = MainWindow()
     window.show()
     return app.exec()
