@@ -2,7 +2,7 @@
 
 ## 用户运行
 
-[image-process](https://github.com/AlexFad6/image-process/releases/latest)下载最新发行版exe即可运行。
+从[image-process](https://github.com/AlexFad6/image-process/releases/latest)下载最新发行版即可运行。
 
 ## 快捷键
 - 鼠标长按拖动图片
