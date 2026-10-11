@@ -5,7 +5,7 @@
 从右侧Release下载[image-process](https://github.com/AlexFad6/image-process/releases/latest)最新发行版即可运行。
 
 ## 快捷键
-- 鼠标长按拖动图片
+- 左键长按拖动图片
 - 滚轮缩放图片
 
 ## 开发者
