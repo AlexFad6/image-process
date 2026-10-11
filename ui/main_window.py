@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import cv2
 import numpy as np
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
-from PySide6.QtWidgets import (QFileDialog, QMainWindow, QMessageBox,
-                               QStatusBar, QWidget, QHBoxLayout, QVBoxLayout)
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QMessageBox, QMenuBar, QStatusBar, QVBoxLayout, QWidget
+
 from core.app_state import AppState
 from core.exporter import Exporter
 from core.image_processor import ImageProcessor
@@ -18,27 +17,41 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("image-process")
         self.resize(1200, 760)
+
         self.state = AppState()
         self.image_queue: list[tuple[np.ndarray, str]] = []
         self.queue_index = -1
-        self.images = ImagePanel(); self.params = ParamPanel()
+
+        self.images = ImagePanel()
+        self.params = ParamPanel()
         self.params.backend.setCurrentText("opencv")
         self.attributes = AttributePanel()
+
         self._create_menu_bar()
-        side = QWidget(); side_layout = QVBoxLayout(side)
-        side_layout.addWidget(self.params); side_layout.addWidget(self.attributes, 1)
+        self._create_second_row_menu()
+
+        side = QWidget()
+        side_layout = QVBoxLayout(side)
+        side_layout.addWidget(self.params)
+        side_layout.addWidget(self.attributes, 1)
+
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(0)
         left_layout.addWidget(self.images, 1)
+
         content = QWidget()
         content_layout = QHBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.addWidget(left, 1)
-        content_layout.addWidget(side)
-        self.setCentralWidget(content); self.setStatusBar(QStatusBar())
+        content_layout.addWidget(left, 2)
+        content_layout.addWidget(side, 1)
+        self.setCentralWidget(content)
+        self.setStatusBar(QStatusBar())
+
+        self.images.convertToGrayRequested.connect(self.convert_to_gray)
         self.params.changed.connect(self.apply_params)
+        self._update_ui_state()
 
     def _create_menu_bar(self) -> None:
         file_menu = self.menuBar().addMenu("文件")
@@ -70,6 +83,29 @@ class MainWindow(QMainWindow):
         help_menu = self.menuBar().addMenu("帮助")
         self._add_action(help_menu, "关于", self.show_about)
 
+    def _create_second_row_menu(self) -> None:
+        second_menu = QMenuBar(self)
+        second_menu.setNativeMenuBar(False)
+        gray_menu = second_menu.addMenu("灰度变换")
+        group = QActionGroup(self)
+        group.setExclusive(True)
+
+        for name, mode in [("线性变换", "linear"), ("对数变换", "log"), ("幂指数变换", "gamma")]:
+            action = QAction(name, self)
+            action.setCheckable(True)
+            action.triggered.connect(lambda checked, value=mode: self.set_transform_mode(value))
+            group.addAction(action)
+            gray_menu.addAction(action)
+        group.actions()[0].setChecked(True)
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self.menuBar())
+        layout.addWidget(second_menu)
+        self.setMenuWidget(container)
+
     @staticmethod
     def _add_action(menu, text: str, slot, shortcut: str | None = None) -> QAction:
         action = QAction(text, menu)
@@ -88,7 +124,11 @@ class MainWindow(QMainWindow):
     def use_custom_backend(self) -> None:
         self.params.backend.setCurrentText("numpy")
 
-    def show_about(self) -> None:
+    def set_transform_mode(self, mode: str) -> None:
+        self.params.mode.setCurrentText(mode)
+        self.apply_params(self.params.params())
+
+    def show_about(self):
         QMessageBox.about(
             self,
             "关于 image-process",
@@ -97,21 +137,66 @@ class MainWindow(QMainWindow):
             "作者：AlexFad",
         )
 
+    def _update_ui_state(self) -> None:
+        if self.state.source is None:
+            self.params.setEnabled(False)
+            self.images.convert_gray.setEnabled(False)
+            return
+        grayscale = self.state.source.ndim == 2
+        self.params.setEnabled(grayscale)
+        self.images.convert_gray.setEnabled(not grayscale)
+        if not grayscale:
+            self.statusBar().showMessage("请先点击“转为灰度”按钮以进行灰度处理")
+
+    def convert_to_gray(self) -> None:
+        if self.state.source is None:
+            return
+        gray = ImageProcessor.to_gray_if_needed(self.state.source)
+        if gray is None:
+            return
+        original_state = self.images.original.get_view_state()
+        result_state = self.images.result.get_view_state()
+        self.state.source = gray
+        self.state.result = None
+        self.images.original.set_image(gray, preserve_view=True)
+        self.images.result.set_image(None, preserve_view=True)
+        self.images.original.restore_view_state(original_state)
+        self.images.result.restore_view_state(result_state)
+        self.attributes.set_original(gray)
+        self.attributes.set_result(None)
+        self._update_ui_state()
+        self.apply_params(self.params.params())
+
     def open_image(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "打开图片", "", "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)")
-        if not path: return
-        image = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "打开图片",
+            "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)",
+        )
+        if not path:
+            return
+        image = Exporter.read_image(path)
         if image is None:
-            QMessageBox.warning(self, "错误", "无法读取图片"); return
+            QMessageBox.warning(self, "错误", "无法读取图片")
+            return
+
         self.image_queue.append((image, path))
         self.queue_index = len(self.image_queue) - 1
         self._show_queue_image()
 
     def _show_queue_image(self) -> None:
+        if not self.image_queue or self.queue_index < 0:
+            return
         image, path = self.image_queue[self.queue_index]
-        self.state.source, self.state.source_path = image, path
+        self.state.source = image
+        self.state.source_path = path
         self.state.result = None
-        self.apply_params(self.params.params())
+        self.images.original.set_image(image)
+        self.images.result.set_image(None)
+        self.attributes.set_original(image)
+        self.attributes.set_result(None)
+        self._update_ui_state()
         self.statusBar().showMessage(f"{self.queue_index + 1}/{len(self.image_queue)}  {path}")
 
     def previous_image(self) -> None:
@@ -125,20 +210,34 @@ class MainWindow(QMainWindow):
             self._show_queue_image()
 
     def apply_params(self, params) -> None:
-        if self.state.source is None: return
+        if self.state.source is None:
+            return
+        if self.state.source.ndim == 3:
+            self.images.result.set_image(None, preserve_view=True)
+            self.attributes.set_result(None)
+            return
         self.state.params = params
         self.state.result = ImageProcessor.apply(self.state.source, params)
-        self.images.original.set_image(ImageProcessor.to_gray(self.state.source))
-        self.images.result.set_image(self.state.result); self.attributes.set_image(self.state.result)
+        original_state = self.images.original.get_view_state()
+        result_state = self.images.result.get_view_state()
+        self.images.original.set_image(self.state.source, preserve_view=True)
+        self.images.result.set_image(self.state.result, preserve_view=True)
+        self.images.original.restore_view_state(original_state)
+        self.images.result.restore_view_state(result_state)
+        self.attributes.set_original(self.state.source)
+        self.attributes.set_result(self.state.result)
 
     def save_image(self) -> None:
-        if self.state.result is None: return
+        if self.state.result is None:
+            return
         path, _ = QFileDialog.getSaveFileName(self, "保存图片", "", "PNG (*.png);;JPEG (*.jpg)")
-        if path and not Exporter.save_image(path, self.state.result): QMessageBox.warning(self, "错误", "保存失败")
+        if path and not Exporter.save_image(path, self.state.result):
+            QMessageBox.warning(self, "错误", "保存失败")
 
     def export_sequence(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(self, "选择图片序列", "", "Images (*.png *.jpg *.jpeg *.bmp)")
-        if not files: return
+        if not files:
+            return
         directory = QFileDialog.getExistingDirectory(self, "输出目录")
         if directory:
             log = Exporter.export_sequence(files, directory, self.params.params())

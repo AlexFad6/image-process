@@ -4,41 +4,110 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
+
 import cv2
 import numpy as np
+
 from .app_state import TransformParams
 from .image_processor import ImageProcessor
 
 
 class Exporter:
     @staticmethod
+    def read_image(path: str) -> Optional[np.ndarray]:
+        candidate = str(Path(path))
+        image = cv2.imread(candidate, cv2.IMREAD_UNCHANGED)
+        if image is not None:
+            return image
+
+        data = np.fromfile(candidate, dtype=np.uint8)
+        if data.size == 0:
+            return None
+        return cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
+
+    @staticmethod
     def save_image(path: str, image: np.ndarray) -> bool:
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        return bool(cv2.imwrite(str(target), image))
+
+        if cv2.imwrite(str(target), image):
+            return True
+
+        suffix = target.suffix.lower() or ".png"
+        ok, encoded = cv2.imencode(suffix, image)
+        if not ok:
+            return False
+
+        with open(target, "wb") as file:
+            file.write(encoded.tobytes())
+        return True
 
     @staticmethod
-    def export_sequence(input_paths: list[str], output_dir: str,
-                        params: TransformParams,
-                        progress: Optional[Callable[[int, int], None]] = None) -> str:
+    def export_sequence(
+        input_paths: list[str],
+        output_dir: str,
+        params: TransformParams,
+        include_suffix: bool = True,
+        include_log: bool = True,
+        progress: Optional[Callable[[int, int], None]] = None,
+    ) -> str:
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
-        records = []
+        records: list[dict] = []
         total = len(input_paths)
-        for index, name in enumerate(input_paths, 1):
-            image = cv2.imread(name, cv2.IMREAD_UNCHANGED)
+
+        for index, src_name in enumerate(input_paths, start=0):
+            image = Exporter.read_image(src_name)
             if image is None:
-                records.append({"input": name, "ok": False, "error": "unreadable"})
-                if progress:
+                records.append({
+                    "index": index,
+                    "input": src_name,
+                    "ok": False,
+                    "error": "unreadable",
+                })
+                if progress is not None:
                     progress(index, total)
                 continue
-            target = out / (Path(name).stem + "_gray.png")
-            ok = Exporter.save_image(str(target), ImageProcessor.apply(image, params))
-            records.append({"input": name, "output": str(target), "ok": ok})
-            if progress:
-                progress(index, total)
-        log = out / "export_log.json"
-        log.write_text(json.dumps({"created": datetime.now().isoformat(timespec="seconds"),
-                                   "parameters": vars(params), "records": records},
-                                  indent=2, ensure_ascii=False), encoding="utf-8")
-        return str(log)
+
+            gray = ImageProcessor.to_gray_if_needed(image)
+            if gray is None:
+                records.append({
+                    "index": index,
+                    "input": src_name,
+                    "ok": False,
+                    "error": "unsupported",
+                })
+                if progress is not None:
+                    progress(index, total)
+                continue
+
+            processed = ImageProcessor.apply(gray, params)
+            stem = Path(src_name).stem
+            suffix = f"_{params.mode}_{params.backend}" if include_suffix else ""
+            target_name = f"{index:03d}{suffix}.png"
+            target = out / target_name
+            ok = Exporter.save_image(str(target), processed)
+            records.append({
+                "index": index,
+                "input": src_name,
+                "output": str(target),
+                "transform": params.mode,
+                "backend": params.backend,
+                "ok": ok,
+                "source_stem": stem,
+            })
+
+            if progress is not None:
+                progress(index + 1, total)
+
+        if include_log:
+            log_path = out / "operations.json"
+            operations = {
+                "created": datetime.now().isoformat(timespec="seconds"),
+                "parameters": vars(params),
+                "records": records,
+            }
+            log_path.write_text(json.dumps(operations, ensure_ascii=False, indent=2), encoding="utf-8")
+            return str(log_path)
+
+        return ""
