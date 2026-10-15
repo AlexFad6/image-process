@@ -21,7 +21,7 @@ class ImageProcessor:
             return image.astype(np.uint8, copy=False)
         if image.shape[-1] == 4:
             image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
-        if image.shape[-1] == 3:
+        elif image.shape[-1] == 3:
             return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         return image.astype(np.uint8, copy=False)
 
@@ -44,14 +44,14 @@ class ImageProcessor:
             if b <= a:
                 return np.zeros_like(src, dtype=np.uint8)
             output = (src - a) * (c - d) / (b - a) + d
-            return ImageProcessor.normalize_to_uint8(output)
-        if mode == "opencv":
+        elif mode == "opencv":
             if b <= a:
                 return np.zeros_like(src, dtype=np.uint8)
             clip = np.clip(src, a, b).astype(np.float32)
             output = (clip - a) * (c - d) / (b - a) + d
-            return ImageProcessor.normalize_to_uint8(output)
-        raise ValueError(f"Unsupported mode: {mode}")
+        else:
+            raise ValueError(f"Unsupported mode: {mode}")
+        return ImageProcessor.normalize_to_uint8(output)
 
     @staticmethod
     def log_transform(img: np.ndarray, c: float, mode: str) -> np.ndarray:
@@ -59,11 +59,11 @@ class ImageProcessor:
         src = np.asarray(img, dtype=np.float32)
         if mode == "numpy":
             output = c * np.log1p(src) * 255.0 / np.log(256.0)
-            return ImageProcessor.normalize_to_uint8(output)
-        if mode == "opencv":
+        elif mode == "opencv":
             output = c * cv2.log(src + 1.0) * 255.0 / np.log(256.0)
-            return ImageProcessor.normalize_to_uint8(output)
-        raise ValueError(f"Unsupported mode: {mode}")
+        else:
+            raise ValueError(f"Unsupported mode: {mode}")
+        return ImageProcessor.normalize_to_uint8(output)
 
     @staticmethod
     def gamma_transform(img: np.ndarray, c: float, gamma: float, mode: str) -> np.ndarray:
@@ -73,12 +73,12 @@ class ImageProcessor:
         if mode == "numpy":
             normalized = np.clip(src / 255.0, 0.0, 1.0)
             output = c * np.power(normalized, gamma) * 255.0
-            return ImageProcessor.normalize_to_uint8(output)
-        if mode == "opencv":
+        elif mode == "opencv":
             normalized = np.clip(src / 255.0, 0.0, 1.0)
             output = c * np.power(normalized, gamma) * 255.0
-            return ImageProcessor.normalize_to_uint8(output)
-        raise ValueError(f"Unsupported mode: {mode}")
+        else:
+            raise ValueError(f"Unsupported mode: {mode}")
+        return ImageProcessor.normalize_to_uint8(output)
 
     @staticmethod
     def apply(image: np.ndarray, params: TransformParams) -> np.ndarray:
@@ -100,6 +100,81 @@ class ImageProcessor:
         if params.backend == "numpy":
             return ImageProcessor.gamma_transform(gray, 1.0, float(params.gamma), "numpy")
         return ImageProcessor.gamma_transform(gray, 1.0, float(params.gamma), "opencv")
+    
+    @staticmethod
+    def histogram_equalization(image: np.ndarray, mode: str) -> np.ndarray:
+        #直方图均衡化
+        if mode == "numpy":
+            gray = ImageProcessor.to_gray_if_needed(image)
+            if gray is None:
+                return np.zeros((1, 1), dtype=np.uint8)
+            hist, bins = np.histogram(gray.flatten(), 256, [0, 256])
+            cdf = hist.cumsum()
+            cdf_normalized = cdf * hist.max() / cdf.max()
+            cdf_m = np.ma.masked_equal(cdf, 0)
+            cdf_m = (cdf_m - cdf_m.min()) * 255 / (cdf_m.max() - cdf_m.min())
+            cdf_final = np.ma.filled(cdf_m, 0).astype(np.uint8)
+            equalized = cdf_final[gray]
+            return equalized
+        elif mode == "opencv":
+            gray = ImageProcessor.to_gray_if_needed(image)
+            if gray is None:
+                return np.zeros((1, 1), dtype=np.uint8)
+            equalized = cv2.equalizeHist(gray)
+        else:
+            raise ValueError(f"Unsupported mode: {mode}")
+        return equalized
+    
+    @staticmethod
+    def gen_filter_kernel(size: int, filter_type: str) -> np.ndarray:
+        #生成滤波器核
+        if filter_type == "mean":
+            # 均值滤波器
+            kernel = np.ones((size, size), np.float32) / (size * size)
+        elif filter_type == "gaussian":
+            # 高斯滤波器
+            kernel = cv2.getGaussianKernel(size, 0)
+            kernel = kernel @ kernel.T
+        elif filter_type == "laplacian":
+            # 拉普拉斯滤波器
+            kernel = np.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]], np.float32)
+        else:
+            raise ValueError(f"Unsupported filter type: {filter_type}")
+        return kernel
+    
+    @staticmethod
+    def spatial_filter(image: np.ndarray, kernel: np.ndarray, mode: str) -> np.ndarray:
+        #用给出的核对图像进行空间滤波
+        if mode == "numpy":
+            gray = ImageProcessor.to_gray_if_needed(image)
+            if gray is None:
+                return np.zeros((1, 1), dtype=np.uint8)
+            filtered = cv2.filter2D(gray, -1, kernel)
+        elif mode == "opencv":
+            gray = ImageProcessor.to_gray_if_needed(image)
+            if gray is None:
+                return np.zeros((1, 1), dtype=np.uint8)
+            filtered = cv2.filter2D(gray, -1, kernel)
+        else:
+            raise ValueError(f"Unsupported mode: {mode}")
+        return filtered
+
+    @staticmethod
+    def median_filter(image: np.ndarray, size: int, ratio: float, mode: str) -> np.ndarray:
+        #统计排序滤波器，ratio参数为填充灰度的百分比，50%为中值滤波器，100%为最大值滤波器，0%为最小值滤波器
+        if mode == "numpy":
+            gray = ImageProcessor.to_gray_if_needed(image)
+            if gray is None:
+                return np.zeros((1, 1), dtype=np.uint8)
+            # 这里可以使用numpy的排序功能来实现统计排序滤波
+        elif mode == "opencv":
+            gray = ImageProcessor.to_gray_if_needed(image)
+            if gray is None:
+                return np.zeros((1, 1), dtype=np.uint8)
+            filtered = cv2.medianBlur(gray, size)
+        else:
+            raise ValueError(f"Unsupported mode: {mode}")
+        return filtered
 
     @staticmethod
     def to_gray(image: np.ndarray) -> np.ndarray:
