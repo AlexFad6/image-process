@@ -16,11 +16,10 @@ class Exporter:
     @staticmethod
     def read_image(path: str) -> Optional[np.ndarray]:
         candidate = str(Path(path))
-        image = cv2.imread(candidate, cv2.IMREAD_UNCHANGED)
-        if image is not None:
-            return image
-
-        data = np.fromfile(candidate, dtype=np.uint8)
+        try:
+            data = np.fromfile(candidate, dtype=np.uint8)
+        except OSError:
+            return None
         if data.size == 0:
             return None
         return cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
@@ -30,17 +29,16 @@ class Exporter:
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
 
-        if cv2.imwrite(str(target), image):
-            return True
-
         suffix = target.suffix.lower() or ".png"
         ok, encoded = cv2.imencode(suffix, image)
         if not ok:
             return False
 
-        with open(target, "wb") as file:
-            file.write(encoded.tobytes())
-        return True
+        try:
+            encoded.tofile(str(target))
+            return True
+        except OSError:
+            return False
 
     @staticmethod
     def export_sequence(
