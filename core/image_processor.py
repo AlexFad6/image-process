@@ -14,7 +14,7 @@ class ImageProcessor:
     """
 
     @staticmethod
-    def to_gray_if_needed(image: np.ndarray | None) -> np.ndarray | None:
+    def to_gray(image: np.ndarray | None) -> np.ndarray | None:
         if image is None:
             return None
         if image.ndim == 2:
@@ -156,9 +156,3 @@ class ImageProcessor:
             raise ValueError(f"Unsupported mode: {mode}")
         return filtered
 
-    @staticmethod
-    def to_gray(image: np.ndarray) -> np.ndarray:
-        gray = ImageProcessor.to_gray_if_needed(image)
-        if gray is None:
-            return np.zeros((1, 1), dtype=np.uint8)
-        return gray

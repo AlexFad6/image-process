@@ -169,7 +169,7 @@ class MainWindow(QMainWindow):
     def convert_to_gray(self) -> None:
         if self.state.source is None:
             return
-        gray = ImageProcessor.to_gray_if_needed(self.state.source)
+        gray = ImageProcessor.to_gray(self.state.source)
         if gray is None:
             return
         original_state = self.images.original.get_view_state()
