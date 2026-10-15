@@ -82,45 +82,36 @@ class ImageProcessor:
 
     @staticmethod
     def apply(image: np.ndarray, params: TransformParams) -> np.ndarray:
-        gray = ImageProcessor.to_gray_if_needed(image)
-        if gray is None:
-            return np.zeros((1, 1), dtype=np.uint8)
         if params.mode == "linear":
             a = float(params.low)
             b = float(params.high)
             c = 0.0
             d = 255.0
             if params.backend == "numpy":
-                return ImageProcessor.linear_transform(gray, a, b, c, d, "numpy")
-            return ImageProcessor.linear_transform(gray, a, b, c, d, "opencv")
+                return ImageProcessor.linear_transform(image, a, b, c, d, "numpy")
+            return ImageProcessor.linear_transform(image, a, b, c, d, "opencv")
         if params.mode == "log":
             if params.backend == "numpy":
-                return ImageProcessor.log_transform(gray, max(0.01, float(params.log_c)), "numpy")
-            return ImageProcessor.log_transform(gray, max(0.01, float(params.log_c)), "opencv")
+                return ImageProcessor.log_transform(image, max(0.01, float(params.log_c)), "numpy")
+            return ImageProcessor.log_transform(image, max(0.01, float(params.log_c)), "opencv")
         if params.backend == "numpy":
-            return ImageProcessor.gamma_transform(gray, 1.0, float(params.gamma), "numpy")
-        return ImageProcessor.gamma_transform(gray, 1.0, float(params.gamma), "opencv")
+            return ImageProcessor.gamma_transform(image, 1.0, float(params.gamma), "numpy")
+        return ImageProcessor.gamma_transform(image, 1.0, float(params.gamma), "opencv")
     
     @staticmethod
     def histogram_equalization(image: np.ndarray, mode: str) -> np.ndarray:
         #直方图均衡化
         if mode == "numpy":
-            gray = ImageProcessor.to_gray_if_needed(image)
-            if gray is None:
-                return np.zeros((1, 1), dtype=np.uint8)
-            hist, bins = np.histogram(gray.flatten(), 256, [0, 256])
+            hist, bins = np.histogram(image.flatten(), 256, [0, 256])
             cdf = hist.cumsum()
             cdf_normalized = cdf * hist.max() / cdf.max()
             cdf_m = np.ma.masked_equal(cdf, 0)
             cdf_m = (cdf_m - cdf_m.min()) * 255 / (cdf_m.max() - cdf_m.min())
             cdf_final = np.ma.filled(cdf_m, 0).astype(np.uint8)
-            equalized = cdf_final[gray]
+            equalized = cdf_final[image]
             return equalized
         elif mode == "opencv":
-            gray = ImageProcessor.to_gray_if_needed(image)
-            if gray is None:
-                return np.zeros((1, 1), dtype=np.uint8)
-            equalized = cv2.equalizeHist(gray)
+            equalized = cv2.equalizeHist(image)
         else:
             raise ValueError(f"Unsupported mode: {mode}")
         return equalized
@@ -146,36 +137,28 @@ class ImageProcessor:
     def spatial_filter(image: np.ndarray, kernel: np.ndarray, mode: str) -> np.ndarray:
         #用给出的核对图像进行空间滤波
         if mode == "numpy":
-            gray = ImageProcessor.to_gray_if_needed(image)
-            if gray is None:
-                return np.zeros((1, 1), dtype=np.uint8)
-            filtered = cv2.filter2D(gray, -1, kernel)
+            filtered = cv2.filter2D(image, -1, kernel)
         elif mode == "opencv":
-            gray = ImageProcessor.to_gray_if_needed(image)
-            if gray is None:
-                return np.zeros((1, 1), dtype=np.uint8)
-            filtered = cv2.filter2D(gray, -1, kernel)
+            filtered = cv2.filter2D(image, -1, kernel)
         else:
             raise ValueError(f"Unsupported mode: {mode}")
         return filtered
 
     @staticmethod
     def median_filter(image: np.ndarray, size: int, ratio: float, mode: str) -> np.ndarray:
-        #统计排序滤波器，ratio参数为填充灰度的百分比，50%为中值滤波器，100%为最大值滤波器，0%为最小值滤波器
+        #百分比滤波器，基于对模板所覆盖像素的灰度值的排序。ratio参数为填充灰度值排序的百分比，50%为中值滤波器，100%为最大值滤波器，0%为最小值滤波器
         if mode == "numpy":
-            gray = ImageProcessor.to_gray_if_needed(image)
-            if gray is None:
-                return np.zeros((1, 1), dtype=np.uint8)
             # 这里可以使用numpy的排序功能来实现统计排序滤波
+            pass
         elif mode == "opencv":
-            gray = ImageProcessor.to_gray_if_needed(image)
-            if gray is None:
-                return np.zeros((1, 1), dtype=np.uint8)
-            filtered = cv2.medianBlur(gray, size)
+            filtered = cv2.medianBlur(image, size)
         else:
             raise ValueError(f"Unsupported mode: {mode}")
         return filtered
 
     @staticmethod
     def to_gray(image: np.ndarray) -> np.ndarray:
-        return ImageProcessor.to_gray_if_needed(image) or np.zeros((1, 1), dtype=np.uint8)
+        gray = ImageProcessor.to_gray_if_needed(image)
+        if gray is None:
+            return np.zeros((1, 1), dtype=np.uint8)
+        return gray

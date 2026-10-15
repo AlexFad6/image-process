@@ -67,19 +67,7 @@ class Exporter:
                     progress(index, total)
                 continue
 
-            gray = ImageProcessor.to_gray_if_needed(image)
-            if gray is None:
-                records.append({
-                    "index": index,
-                    "input": src_name,
-                    "ok": False,
-                    "error": "unsupported",
-                })
-                if progress is not None:
-                    progress(index, total)
-                continue
-
-            processed = ImageProcessor.apply(gray, params)
+            processed = ImageProcessor.apply(image, params)
             stem = Path(src_name).stem
             suffix = f"_{params.mode}_{params.backend}" if include_suffix else ""
             target_name = f"{index:03d}{suffix}.png"
