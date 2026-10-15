@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QGroupBox, QPushButton, QWidget
+from PySide6.QtWidgets import (
+    QGroupBox,
+    QHBoxLayout,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .image_view import ImageView
 
@@ -29,8 +36,9 @@ class ImagePanel(QGroupBox):
         content_layout.setContentsMargins(0, 0, 0, 0)
         self.original = ImageView()
         self.result = ImageView()
-        content_layout.addWidget(self.original)
-        content_layout.addWidget(self.result)
+        for view in (self.original, self.result):
+            view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            content_layout.addWidget(view, 1)
         outer.addWidget(content)
 
         self.original.set_partner(self.result)
@@ -44,3 +52,10 @@ class ImagePanel(QGroupBox):
     def reset_views(self) -> None:
         self.original.reset_view()
         self.result.reset_view()
+        self.sync_views()
+
+    def sync_views(self) -> None:
+        state = self.original.get_view_state()
+        if state is None:
+            return
+        self.result.restore_view_state(state)

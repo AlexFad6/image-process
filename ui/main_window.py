@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QMessageBox, QMenuBar, QStatusBar, QVBoxLayout, QWidget
 
 from core.app_state import AppState
@@ -51,8 +54,23 @@ class MainWindow(QMainWindow):
 
         self.images.convertToGrayRequested.connect(self.convert_to_gray)
         self.params.changed.connect(self.apply_params)
-        self._update_ui_state()
+        # 加载默认 cameraman.tif 图像
+        self._load_default_image()
+        QTimer.singleShot(0, self.images.reset_views)
 
+    def _load_default_image(self) -> None:
+        default_path = Path(__file__).resolve().parent.parent / "standard_test_images" / "cameraman.tif"
+        image = Exporter.read_image(str(default_path))
+        if image is None:
+            self._update_ui_state()
+            return
+
+        self.image_queue.append((image, str(default_path)))
+        self.queue_index = 0
+        self._show_queue_image()
+        # 两侧图像视图同步
+        self._update_ui_state()
+        
     def _create_menu_bar(self) -> None:
         file_menu = self.menuBar().addMenu("文件")
         self._add_action(file_menu, "打开图像", self.open_image, "Ctrl+O")
@@ -224,6 +242,7 @@ class MainWindow(QMainWindow):
         self.images.result.set_image(self.state.result, preserve_view=True)
         self.images.original.restore_view_state(original_state)
         self.images.result.restore_view_state(result_state)
+        self.images.sync_views()
         self.attributes.set_original(self.state.source)
         self.attributes.set_result(self.state.result)
 
