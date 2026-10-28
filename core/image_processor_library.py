@@ -33,15 +33,11 @@ class LibraryImageProcessor:
         """Linear transformation, maps input range [a, b] to output range [c, d]"""
         """y = (x - a) * (d - c) / (b - a) + c"""
 
-        if b <= a:
+        if b == a:
             return np.zeros_like(img, dtype=np.uint8)
-
-        alpha = (d - c) / (b - a)
-        beta  = c - a * alpha
-
-        return cv2.addWeighted(img.astype(np.float32), alpha,
-                            np.zeros_like(img, dtype=np.float32), 0.0,
-                            beta).astype(np.uint8)
+        
+        output = (np.asarray(img, dtype=np.float32) - a) * (d - c) / (b - a) + c
+        return np.clip(output, 0, 255).astype(np.uint8)
 
     @staticmethod
     def log_transform(img: np.ndarray, c: float) -> np.ndarray:
