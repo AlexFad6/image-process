@@ -9,7 +9,8 @@ from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QMessageBox
 
 from core.app_state import AppState
 from core.exporter import Exporter
-from core.image_processor import ImageProcessor
+from core.image_processor_library import LibraryImageProcessor
+from core.image_processor_manual import ManualImageProcessor
 from .attribute_panel import AttributePanel
 from .image_panel import ImagePanel
 from .param_panel import ParamPanel
@@ -28,7 +29,7 @@ class MainWindow(QMainWindow):
 
         self.images = ImagePanel()
         self.params = ParamPanel()
-        self.params.backend.setCurrentText("opencv")
+        self.processor = LibraryImageProcessor
         self.attributes = AttributePanel()
 
         self._create_menu_bar()
@@ -138,10 +139,12 @@ class MainWindow(QMainWindow):
         self.images.set_sync_zoom(enabled)
 
     def use_library_backend(self) -> None:
-        self.params.backend.setCurrentText("opencv")
+        self.processor = LibraryImageProcessor
+        self.apply_params(self.params.params())
 
     def use_custom_backend(self) -> None:
-        self.params.backend.setCurrentText("numpy")
+        self.processor = ManualImageProcessor
+        self.apply_params(self.params.params())
 
     def set_transform_mode(self, mode: str) -> None:
         self.params.mode.setCurrentText(mode)
@@ -170,7 +173,7 @@ class MainWindow(QMainWindow):
     def convert_to_gray(self) -> None:
         if self.state.source is None:
             return
-        gray = ImageProcessor.to_gray(self.state.source)
+        gray = self.processor.to_gray(self.state.source)
         if gray is None:
             return
         original_state = self.images.original.get_view_state()
@@ -236,7 +239,7 @@ class MainWindow(QMainWindow):
             self.attributes.set_result(None)
             return
         self.state.params = params
-        self.state.result = ImageProcessor.apply(self.state.source, params)
+        self.state.result = self.processor.apply(self.state.source, params)
         original_state = self.images.original.get_view_state()
         result_state = self.images.result.get_view_state()
         self.images.original.set_image(self.state.source, preserve_view=True)
@@ -260,5 +263,5 @@ class MainWindow(QMainWindow):
             return
         directory = QFileDialog.getExistingDirectory(self, "输出目录")
         if directory:
-            log = Exporter.export_sequence(files, directory, self.params.params())
+            log = Exporter.export_sequence(files, directory, self.params.params(), self.processor)
             self.statusBar().showMessage(f"导出完成：{log}")

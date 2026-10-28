@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+
 import pyqtgraph as pg
 from PySide6.QtWidgets import QGroupBox, QLabel, QTabWidget, QVBoxLayout, QWidget
 

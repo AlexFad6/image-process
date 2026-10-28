@@ -15,8 +15,6 @@ class ParamPanel(QGroupBox):
 
         self.mode = QComboBox()
         self.mode.addItems(["linear", "log", "gamma"])
-        self.backend = QComboBox()
-        self.backend.addItems(["numpy", "opencv"])
 
         self.low = self._spin(0, 255, 0)
         self.high = self._spin(0, 255, 255)
@@ -29,7 +27,6 @@ class ParamPanel(QGroupBox):
         self.gamma_label = QLabel("gamma")
 
         form.addRow("模式", self.mode)
-        form.addRow("后端", self.backend)
         form.addRow(self.low_label, self.low)
         form.addRow(self.high_label, self.high)
         form.addRow(self.log_label, self.log_c)
@@ -42,7 +39,7 @@ class ParamPanel(QGroupBox):
         self._timer.setSingleShot(True)
         self._timer.setInterval(200)
 
-        for widget in (self.mode, self.backend, self.low, self.high, self.log_c, self.gamma):
+        for widget in (self.mode, self.low, self.high, self.log_c, self.gamma):
             signal = widget.currentIndexChanged if isinstance(widget, QComboBox) else widget.valueChanged
             signal.connect(self._schedule)
 
@@ -81,7 +78,6 @@ class ParamPanel(QGroupBox):
 
     def _reset(self) -> None:
         self.mode.setCurrentText("linear")
-        self.backend.setCurrentText("opencv")
         self.low.setValue(0)
         self.high.setValue(255)
         self.log_c.setValue(1)
@@ -94,5 +90,4 @@ class ParamPanel(QGroupBox):
             high=self.high.value(),
             log_c=self.log_c.value(),
             gamma=self.gamma.value(),
-            backend=self.backend.currentText(),
         )

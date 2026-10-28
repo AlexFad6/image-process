@@ -13,7 +13,6 @@ class TransformParams:
     high: float = 255.0
     log_c: float = 1.0
     gamma: float = 1.0
-    backend: str = "opencv"
 
 
 @dataclass

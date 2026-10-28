@@ -9,7 +9,6 @@ import cv2
 import numpy as np
 
 from .app_state import TransformParams
-from .image_processor import ImageProcessor
 
 
 class Exporter:
@@ -45,6 +44,7 @@ class Exporter:
         input_paths: list[str],
         output_dir: str,
         params: TransformParams,
+        processor,
         include_suffix: bool = True,
         include_log: bool = True,
         progress: Optional[Callable[[int, int], None]] = None,
@@ -67,9 +67,9 @@ class Exporter:
                     progress(index, total)
                 continue
 
-            processed = ImageProcessor.apply(image, params)
+            processed = processor.apply(image, params)
             stem = Path(src_name).stem
-            suffix = f"_{params.mode}_{params.backend}" if include_suffix else ""
+            suffix = f"_{params.mode}" if include_suffix else ""
             target_name = f"{index:03d}{suffix}.png"
             target = out / target_name
             ok = Exporter.save_image(str(target), processed)
@@ -78,7 +78,6 @@ class Exporter:
                 "input": src_name,
                 "output": str(target),
                 "transform": params.mode,
-                "backend": params.backend,
                 "ok": ok,
                 "source_stem": stem,
             })
