@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import numpy as np
 
-from .app_state import TransformParams
-
-
 class ManualImageProcessor:
+    """使用NumPy操作实现的图像处理算法。"""
     """Image processing algorithms implemented with NumPy operations."""
 
     @staticmethod
     def to_gray(image: np.ndarray | None) -> np.ndarray | None:
+        """将图像转换为灰度图像。"""
+        """Convert the image to grayscale."""
+
         if image is None or image.ndim == 2:
             return image
         if image.shape[-1] == 4:
@@ -25,54 +26,73 @@ class ManualImageProcessor:
 
     @staticmethod
     def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
-        return np.clip(np.asarray(image, dtype=np.float32), 0, 255).astype(np.uint8)
+        """将值域线性映射到[0,255]"""
+        """Normalize the value range to [0, 255]"""
 
-    @staticmethod
-    def clip_image(image: np.ndarray) -> np.ndarray:
-        return np.clip(image, 0, 255).astype(np.float32)
+        values = np.asarray(image, dtype=np.float32)
+        low, high = values.min(), values.max()
+        if low == high:
+            return np.zeros(values.shape, dtype=np.uint8)
+        values = (values - low) / (high - low) * 255
+        return np.clip(values, 0, 255).astype(np.uint8)
 
     @staticmethod
     def linear_transform(img: np.ndarray, a: float, b: float, c: float, d: float) -> np.ndarray:
+        """线性变换，把输入区间 [a, b] 映射到输出区间 [c, d]"""
+        """Linear transformation, maps input range [a, b] to output range [c, d]"""
+        """y = (x - a) * (d - c) / (b - a) + c"""
+
         if b <= a:
             return np.zeros_like(img, dtype=np.uint8)
-        output = (np.asarray(img, dtype=np.float32) - a) * (c - d) / (b - a) + d
-        return ManualImageProcessor.normalize_to_uint8(output)
+
+        output = (np.asarray(img, dtype=np.float32) - a) * (d - c) / (b - a) + c
+        return np.clip(output, 0, 255).astype(np.uint8)
 
     @staticmethod
     def log_transform(img: np.ndarray, c: float) -> np.ndarray:
+        """对数变换"""
+        """Logarithmic transformation"""
+        """y = c * log(1 + x)"""
+
         output = c * np.log1p(np.asarray(img, dtype=np.float32)) * 255.0 / np.log(256.0)
-        return ManualImageProcessor.normalize_to_uint8(output)
+        return np.clip(output, 0, 255).astype(np.uint8)
 
     @staticmethod
     def gamma_transform(img: np.ndarray, c: float, gamma: float) -> np.ndarray:
-        normalized = np.clip(np.asarray(img, dtype=np.float32) / 255.0, 0.0, 1.0)
-        output = c * np.power(normalized, max(0.01, float(gamma))) * 255.0
-        return ManualImageProcessor.normalize_to_uint8(output)
+        """伽马变换"""
+        """Gamma transformation"""
+        """y = c * x^gamma"""
 
-    @staticmethod
-    def apply(image: np.ndarray, params: TransformParams) -> np.ndarray:
-        if params.mode == "linear":
-            return ManualImageProcessor.linear_transform(image, params.low, params.high, 0.0, 255.0)
-        if params.mode == "log":
-            return ManualImageProcessor.log_transform(image, max(0.01, params.log_c))
-        if params.mode == "gamma":
-            return ManualImageProcessor.gamma_transform(image, 1.0, params.gamma)
-        raise ValueError(f"Unsupported transform mode: {params.mode}")
+        i = np.arange(256, dtype=np.float32)
+        table = np.clip(c * np.power(i / 255.0, gamma) * 255.0, 0, 255).astype(np.uint8)
+        return table[np.asarray(img)]
 
     @staticmethod
     def histogram_equalization(image: np.ndarray) -> np.ndarray:
+        """直方图均衡化"""
+        """Histogram equalization"""
+
         values = np.asarray(image, dtype=np.uint8)
         hist = np.bincount(values.ravel(), minlength=256)
         cdf = hist.cumsum()
-        nonzero = cdf[cdf > 0]
-        if nonzero.size == 0 or nonzero[-1] == nonzero[0]:
+        cdf_min = cdf[cdf > 0].min()
+        N = cdf[-1]
+
+        if N == 0 or N == cdf_min:
             return values.copy()
+
         lut = np.zeros(256, dtype=np.uint8)
-        lut[cdf > 0] = np.round((cdf[cdf > 0] - nonzero[0]) * 255 / (nonzero[-1] - nonzero[0])).astype(np.uint8)
+        mask = cdf > 0
+        vals = (cdf[mask] - cdf_min) * 255.0 / (N - cdf_min)
+        lut[mask] = np.clip(np.round(vals), 0, 255).astype(np.uint8)
+
         return lut[values]
 
     @staticmethod
     def gen_filter_kernel(size: int, filter_type: str) -> np.ndarray:
+        """生成滤波器核"""
+        """Generate filter kernel"""
+        
         if filter_type == "mean":
             return np.ones((size, size), dtype=np.float32) / (size * size)
         if filter_type == "gaussian":
@@ -94,6 +114,9 @@ class ManualImageProcessor:
 
     @staticmethod
     def spatial_filter(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
+        """空间滤波"""
+        """Spatial filtering"""
+
         values = np.asarray(image, dtype=np.float32)
         height, width = values.shape[:2]
         kh, kw = kernel.shape

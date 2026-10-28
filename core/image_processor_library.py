@@ -3,14 +3,15 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from .app_state import TransformParams
-
-
 class LibraryImageProcessor:
+    """使用OpenCV实现的图像处理算法。"""
     """Image processing algorithms implemented with OpenCV."""
 
     @staticmethod
     def to_gray(image: np.ndarray | None) -> np.ndarray | None:
+        """将图像转换为灰度图像。"""
+        """Convert the image to grayscale."""
+        
         if image is None or image.ndim == 2:
             return image
         if image.shape[-1] == 4:
@@ -21,46 +22,58 @@ class LibraryImageProcessor:
 
     @staticmethod
     def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
-        return np.clip(np.asarray(image, dtype=np.float32), 0, 255).astype(np.uint8)
+        """将值域线性映射到[0,255]"""
+        """Normalize the value range to [0, 255]"""
 
-    @staticmethod
-    def clip_image(image: np.ndarray) -> np.ndarray:
-        return np.clip(image, 0, 255).astype(np.float32)
+        return cv2.normalize(image, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
 
     @staticmethod
     def linear_transform(img: np.ndarray, a: float, b: float, c: float, d: float) -> np.ndarray:
+        """线性变换，把输入区间 [a, b] 映射到输出区间 [c, d]"""
+        """Linear transformation, maps input range [a, b] to output range [c, d]"""
+        """y = (x - a) * (d - c) / (b - a) + c"""
+
         if b <= a:
             return np.zeros_like(img, dtype=np.uint8)
-        clipped = np.clip(np.asarray(img, dtype=np.float32), a, b)
-        return LibraryImageProcessor.normalize_to_uint8((clipped - a) * (c - d) / (b - a) + d)
+
+        alpha = (d - c) / (b - a)
+        beta  = c - a * alpha
+
+        return cv2.addWeighted(img.astype(np.float32), alpha,
+                            np.zeros_like(img, dtype=np.float32), 0.0,
+                            beta).astype(np.uint8)
 
     @staticmethod
     def log_transform(img: np.ndarray, c: float) -> np.ndarray:
-        source = np.asarray(img, dtype=np.float32)
-        output = c * cv2.log(source + 1.0) * 255.0 / np.log(256.0)
-        return LibraryImageProcessor.normalize_to_uint8(output)
+        """对数变换"""
+        """Logarithmic transformation"""
+        """y = c * log(1 + x)"""
+
+        output = c * np.log1p(np.asarray(img, dtype=np.float32)) * 255.0 / np.log(256.0)
+        return np.clip(output, 0, 255).astype(np.uint8)
 
     @staticmethod
     def gamma_transform(img: np.ndarray, c: float, gamma: float) -> np.ndarray:
-        source = np.clip(np.asarray(img, dtype=np.float32) / 255.0, 0.0, 1.0)
-        return LibraryImageProcessor.normalize_to_uint8(c * cv2.pow(source, max(0.01, float(gamma))) * 255.0)
+        """伽马变换"""
+        """Gamma transformation"""
+        """y = c * x^gamma"""
 
-    @staticmethod
-    def apply(image: np.ndarray, params: TransformParams) -> np.ndarray:
-        if params.mode == "linear":
-            return LibraryImageProcessor.linear_transform(image, params.low, params.high, 0.0, 255.0)
-        if params.mode == "log":
-            return LibraryImageProcessor.log_transform(image, max(0.01, params.log_c))
-        if params.mode == "gamma":
-            return LibraryImageProcessor.gamma_transform(image, 1.0, params.gamma)
-        raise ValueError(f"Unsupported transform mode: {params.mode}")
+        i = np.arange(256, dtype=np.float32)
+        table = np.clip(c * np.power(i / 255.0, gamma) * 255.0, 0, 255).astype(np.uint8)
+        return cv2.LUT(img, table)
 
     @staticmethod
     def histogram_equalization(image: np.ndarray) -> np.ndarray:
+        """直方图均衡化"""
+        """Histogram equalization"""
+
         return cv2.equalizeHist(image)
 
     @staticmethod
     def gen_filter_kernel(size: int, filter_type: str) -> np.ndarray:
+        """生成滤波器核"""
+        """Generate filter kernel"""
+        
         if filter_type == "mean":
             return np.ones((size, size), np.float32) / (size * size)
         if filter_type == "gaussian":
@@ -80,6 +93,11 @@ class LibraryImageProcessor:
 
     @staticmethod
     def spatial_filter(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
+        """空间滤波"""
+        """Spatial filtering"""
+
+        # 注意 OpenCV 的 filter2D 实际计算的是相关而不是卷积
+        # Note that OpenCV's filter2D actually computes correlation rather than convolution
         return cv2.filter2D(image, -1, kernel)
 
     @staticmethod
