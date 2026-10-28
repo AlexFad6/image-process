@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QIcon
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QMessageBox, QMenuBar, QStatusBar, QVBoxLayout, QWidget
 
@@ -20,6 +20,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("image-process")
         self.resize(1200, 760)
+        self.setWindowIcon(QIcon("app_icon.png"))
 
         self.state = AppState()
         self.image_queue: list[tuple[np.ndarray, str]] = []
