@@ -68,11 +68,11 @@ class Exporter:
                 continue
 
             if params.mode == "linear":
-                processed = processor.linear_transform(image, params.low, params.high, 0.0, 255.0)
+                processed = processor.linear_transform(image, params.a, params.b, params.c, params.d)
             elif params.mode == "log":
-                processed = processor.log_transform(image, max(0.01, params.log_c))
+                processed = processor.log_transform(image, params.c)
             elif params.mode == "gamma":
-                processed = processor.gamma_transform(image, 1.0, params.gamma)
+                processed = processor.gamma_transform(image, params.c, params.gamma)
             else:
                 raise ValueError(f"Unsupported transform mode: {params.mode}")
             stem = Path(src_name).stem

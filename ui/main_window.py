@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QStackedWidget,
+    QSplitter,
     QStatusBar,
     QToolBar,
     QVBoxLayout,
@@ -55,8 +56,24 @@ class MainWindow(QMainWindow):
 
         side = QWidget()
         side_layout = QVBoxLayout(side)
-        side_layout.addWidget(self.operation_pages)
-        side_layout.addWidget(self.attributes, 1)
+        side_layout.setContentsMargins(5, 5, 5, 5)
+        self.right_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.right_splitter.addWidget(self.operation_pages)
+        self.right_splitter.addWidget(self.attributes)
+        self.right_splitter.setSizes([400, 100])
+        self.right_splitter.setChildrenCollapsible(False)
+        self.right_splitter.setHandleWidth(8)
+        self.right_splitter.setStyleSheet(
+            """
+            QSplitter::handle {
+                background-color: #d4d4d4;
+            }
+            QSplitter::handle:pressed {
+                background-color: #a0a0a0;
+            }
+            """
+        )
+        side_layout.addWidget(self.right_splitter)
 
         left = QWidget()
         left_layout = QVBoxLayout(left)
@@ -161,7 +178,7 @@ class MainWindow(QMainWindow):
         self.apply_params(self.params.params())
 
     def set_transform_mode(self, mode: str) -> None:
-        self.params.mode.setCurrentText(mode)
+        self.params.set_mode(mode)
         self.apply_params(self.params.params())
 
     def show_about(self):
@@ -255,15 +272,15 @@ class MainWindow(QMainWindow):
         self.state.params = params
         if params.mode == "linear":
             self.state.result = self.processor.linear_transform(
-                self.state.source, params.low, params.high, 0.0, 255.0
+                self.state.source, params.a, params.b, params.c, params.d
             )
         elif params.mode == "log":
             self.state.result = self.processor.log_transform(
-                self.state.source, max(0.01, params.log_c)
+                self.state.source, params.c
             )
         elif params.mode == "gamma":
             self.state.result = self.processor.gamma_transform(
-                self.state.source, 1.0, params.gamma
+                self.state.source, params.c, params.gamma
             )
         else:
             raise ValueError(f"Unsupported transform mode: {params.mode}")
