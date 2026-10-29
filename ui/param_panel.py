@@ -1,15 +1,19 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QPushButton,
+    QSlider,
     QToolBar,
     QVBoxLayout,
+    QWidget,
 )
 
 from core.app_state import TransformParams
@@ -43,33 +47,37 @@ class ParamPanel(QGroupBox):
         form = QFormLayout()
         layout.addLayout(form)
 
-        self.a = self._spin(0, 255, 0)
-        self.b = self._spin(0, 255, 255)
-        self.c = self._spin(0, 255, 0)
-        self.d = self._spin(0, 255, 255)
-        self.gamma = self._spin(0.01, 10, 1, 0.1)
+        self.a, self.a_row, self.a_slider = self._parameter_row("a", 0, 255, 0)
+        self.b, self.b_row, self.b_slider = self._parameter_row("b", 0, 255, 255)
+        self.c, self.c_row, self.c_slider = self._parameter_row("c", 0, 255, 0)
+        self.d, self.d_row, self.d_slider = self._parameter_row("d", 0, 255, 255)
+        self.gamma, self.gamma_row, self.gamma_slider = self._parameter_row(
+            "gamma", 0.01, 10, 1, 2, 0.01
+        )
 
-        self.low_label = QLabel("a")
-        self.high_label = QLabel("b")
-        self.c_label = QLabel("c")
-        self.d_label = QLabel("d")
-        self.gamma_label = QLabel("gamma")
-
-        form.addRow(self.low_label, self.a)
-        form.addRow(self.high_label, self.b)
-        form.addRow(self.c_label, self.c)
-        form.addRow(self.d_label, self.d)
-        form.addRow(self.gamma_label, self.gamma)
+        form.addRow(self.a_row)
+        form.addRow(self.b_row)
+        form.addRow(self.c_row)
+        form.addRow(self.d_row)
+        form.addRow(self.gamma_row)
 
         self.reset = QPushButton("重置参数")
         layout.addWidget(self.reset)
 
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
-        self._timer.setInterval(200)
+        self._timer.setInterval(100)
 
         for widget in (self.a, self.b, self.c, self.d, self.gamma):
             widget.valueChanged.connect(self._schedule)
+        for slider in (
+            self.a_slider,
+            self.b_slider,
+            self.c_slider,
+            self.d_slider,
+            self.gamma_slider,
+        ):
+            slider.valueChanged.connect(self._schedule)
 
         self.reset.clicked.connect(self._reset)
         self._timer.timeout.connect(self._emit)
@@ -77,12 +85,51 @@ class ParamPanel(QGroupBox):
         self._sync_visibility()
 
     @staticmethod
-    def _spin(minimum: float, maximum: float, value: float, step: float = 1) -> QDoubleSpinBox:
-        box = QDoubleSpinBox()
-        box.setRange(minimum, maximum)
-        box.setValue(value)
-        box.setSingleStep(step)
-        return box
+    def _parameter_row(
+        label_text: str,
+        minimum: float,
+        maximum: float,
+        value: float,
+        decimals: int = 2,
+        step: float = 1,
+    ) -> tuple[QDoubleSpinBox, QWidget, QSlider]:
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+
+        label = QLabel(label_text)
+        label.setFixedWidth(45)
+        row_layout.addWidget(label)
+
+        scale_factor = 10 ** decimals
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setRange(int(minimum * scale_factor), int(maximum * scale_factor))
+        slider.setValue(int(value * scale_factor))
+        row_layout.addWidget(slider)
+
+        spinbox = QDoubleSpinBox()
+        spinbox.setRange(minimum, maximum)
+        spinbox.setDecimals(decimals)
+        spinbox.setSingleStep(step)
+        spinbox.setValue(value)
+        spinbox.setFixedWidth(80)
+        spinbox.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        spinbox.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        row_layout.addWidget(spinbox)
+
+        def on_slider_changed(slider_value: int) -> None:
+            spinbox.blockSignals(True)
+            spinbox.setValue(slider_value / scale_factor)
+            spinbox.blockSignals(False)
+
+        def on_spinbox_changed(spin_value: float) -> None:
+            slider.blockSignals(True)
+            slider.setValue(int(round(spin_value * scale_factor)))
+            slider.blockSignals(False)
+
+        slider.valueChanged.connect(on_slider_changed)
+        spinbox.valueChanged.connect(on_spinbox_changed)
+        return spinbox, row, slider
 
     def _schedule(self, *_args) -> None:
         self._timer.start()
@@ -92,18 +139,11 @@ class ParamPanel(QGroupBox):
 
     def _sync_visibility(self, *_args) -> None:
         mode = self.mode_name()
-        self.low_label.setVisible(mode == "linear")
-        self.high_label.setVisible(mode == "linear")
-        self.a.setVisible(mode == "linear")
-        self.b.setVisible(mode == "linear")
-
-        self.c_label.setVisible(mode in ("log", "gamma"))
-        self.c.setVisible(mode in ("log", "gamma"))
-        self.d_label.setVisible(mode == "linear")
-        self.d.setVisible(mode == "linear")
-
-        self.gamma_label.setVisible(mode == "gamma")
-        self.gamma.setVisible(mode == "gamma")
+        self.a_row.setVisible(mode == "linear")
+        self.b_row.setVisible(mode == "linear")
+        self.c_row.setVisible(mode in ("linear", "log", "gamma"))
+        self.d_row.setVisible(mode == "linear")
+        self.gamma_row.setVisible(mode == "gamma")
 
     def _reset(self) -> None:
         self.mode_actions["linear"].setChecked(True)
