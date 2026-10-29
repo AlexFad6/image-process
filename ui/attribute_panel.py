@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import numpy as np
+import cv2
 
-import pyqtgraph as pg
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.figure import Figure
 from PySide6.QtWidgets import QGroupBox, QLabel, QTabWidget, QVBoxLayout, QWidget
 
 
@@ -14,16 +16,16 @@ class AttributePanel(QGroupBox):
         self.tab_2 = QWidget()
 
         self.info_1 = QLabel("图像1：未打开图片")
-        self.plot_1 = pg.PlotWidget()
+        self.figure_1 = Figure()
+        self.axes_1 = self.figure_1.add_subplot(111)
+        self.plot_1 = FigureCanvasQTAgg(self.figure_1)
         self.plot_1.setMinimumHeight(180)
-        self.plot_1.setLabel("bottom", "灰度")
-        self.plot_1.setLabel("left", "像素")
 
         self.info_2 = QLabel("图像2：未打开图片")
-        self.plot_2 = pg.PlotWidget()
+        self.figure_2 = Figure()
+        self.axes_2 = self.figure_2.add_subplot(111)
+        self.plot_2 = FigureCanvasQTAgg(self.figure_2)
         self.plot_2.setMinimumHeight(180)
-        self.plot_2.setLabel("bottom", "灰度")
-        self.plot_2.setLabel("left", "像素")
 
         layout_1 = QVBoxLayout(self.tab_1)
         layout_1.addWidget(self.info_1)
@@ -41,19 +43,26 @@ class AttributePanel(QGroupBox):
 
     def set_image(self, image: np.ndarray | None, *, source: bool = False) -> None:
         target_info = self.info_1 if not source else self.info_2
+        target_axes = self.axes_1 if not source else self.axes_2
         target_plot = self.plot_1 if not source else self.plot_2
-        target_plot.clear()
+        target_axes.clear()
 
         if image is None:
             target_info.setText("图像1：未打开图片" if not source else "图像2：未打开图片")
+            target_plot.draw_idle()
             return
 
-        hist = np.bincount(image.ravel(), minlength=256)
+        hist = cv2.calcHist([image], [0], None, [256], [0, 256]).ravel()
         target_info.setText(
             f"{('图像1' if not source else '图像2')}：尺寸 {image.shape[1]} × {image.shape[0]} | "
-            f"均值 {image.mean():.2f} | 最小/最大 {image.min()} / {image.max()} | 通道 {image.ndim}"
+            f"均值 {image.mean():.2f} | 通道 {image.ndim}"
         )
-        target_plot.plot(hist, pen="y")
+        target_axes.bar(range(256), hist, width=1, color="steelblue")
+        target_axes.set_xlim(0, 256)
+        target_axes.set_xticks([])
+        target_axes.set_yticks([])
+        target_plot.figure.tight_layout()
+        target_plot.draw_idle()
 
     def set_original(self, image: np.ndarray | None) -> None:
         self.set_image(image, source=False)

@@ -239,7 +239,20 @@ class MainWindow(QMainWindow):
             self.attributes.set_result(None)
             return
         self.state.params = params
-        self.state.result = self.processor.apply(self.state.source, params)
+        if params.mode == "linear":
+            self.state.result = self.processor.linear_transform(
+                self.state.source, params.low, params.high, 0.0, 255.0
+            )
+        elif params.mode == "log":
+            self.state.result = self.processor.log_transform(
+                self.state.source, max(0.01, params.log_c)
+            )
+        elif params.mode == "gamma":
+            self.state.result = self.processor.gamma_transform(
+                self.state.source, 1.0, params.gamma
+            )
+        else:
+            raise ValueError(f"Unsupported transform mode: {params.mode}")
         original_state = self.images.original.get_view_state()
         result_state = self.images.result.get_view_state()
         self.images.original.set_image(self.state.source, preserve_view=True)
