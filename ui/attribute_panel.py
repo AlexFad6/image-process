@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QGroupBox, QLabel, QTabWidget, QVBoxLayout, QWidge
 
 class AttributePanel(QGroupBox):
     def __init__(self, parent=None) -> None:
-        super().__init__("属性与直方图", parent)
+        super().__init__("属性", parent)
         self.tabs = QTabWidget(self)
         self.tab_1 = QWidget()
         self.tab_2 = QWidget()
