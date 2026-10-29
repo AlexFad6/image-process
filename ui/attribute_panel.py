@@ -55,7 +55,7 @@ class AttributePanel(QGroupBox):
         hist = cv2.calcHist([image], [0], None, [256], [0, 256]).ravel()
         target_info.setText(
             f"{('图像1' if not source else '图像2')}：尺寸 {image.shape[1]} × {image.shape[0]} | "
-            f"均值 {image.mean():.2f} | 通道 {image.ndim}"
+            f"均值 {image.mean():.2f}"
         )
         target_axes.bar(range(256), hist, width=1, color="steelblue")
         target_axes.set_xlim(0, 256)
