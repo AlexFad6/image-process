@@ -67,7 +67,14 @@ class Exporter:
                     progress(index, total)
                 continue
 
-            processed = processor.apply(image, params)
+            if params.mode == "linear":
+                processed = processor.linear_transform(image, params.low, params.high, 0.0, 255.0)
+            elif params.mode == "log":
+                processed = processor.log_transform(image, max(0.01, params.log_c))
+            elif params.mode == "gamma":
+                processed = processor.gamma_transform(image, 1.0, params.gamma)
+            else:
+                raise ValueError(f"Unsupported transform mode: {params.mode}")
             stem = Path(src_name).stem
             suffix = f"_{params.mode}" if include_suffix else ""
             target_name = f"{index:03d}{suffix}.png"
