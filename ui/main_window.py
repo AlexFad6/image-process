@@ -4,8 +4,19 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QIcon
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QMessageBox, QMenuBar, QStatusBar, QVBoxLayout, QWidget
+from PySide6.QtCore import QTimer, Qt
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QStackedWidget,
+    QStatusBar,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
+)
 
 from core.app_state import AppState
 from core.exporter import Exporter
@@ -31,13 +42,20 @@ class MainWindow(QMainWindow):
         self.params = ParamPanel()
         self.processor = LibraryImageProcessor
         self.attributes = AttributePanel()
+        self.operation_pages = QStackedWidget()
+        self.operation_pages.addWidget(self.params)
+        spatial_filter_page = QWidget()
+        spatial_filter_layout = QVBoxLayout(spatial_filter_page)
+        spatial_filter_layout.addWidget(QLabel("空间滤波"))
+        spatial_filter_layout.addStretch()
+        self.operation_pages.addWidget(spatial_filter_page)
 
         self._create_menu_bar()
-        self._create_second_row_menu()
+        self._create_operation_toolbar()
 
         side = QWidget()
         side_layout = QVBoxLayout(side)
-        side_layout.addWidget(self.params)
+        side_layout.addWidget(self.operation_pages)
         side_layout.addWidget(self.attributes, 1)
 
         left = QWidget()
@@ -103,28 +121,24 @@ class MainWindow(QMainWindow):
         help_menu = self.menuBar().addMenu("帮助")
         self._add_action(help_menu, "关于", self.show_about)
 
-    def _create_second_row_menu(self) -> None:
-        second_menu = QMenuBar(self)
-        second_menu.setNativeMenuBar(False)
-        gray_menu = second_menu.addMenu("灰度变换")
-        group = QActionGroup(self)
-        group.setExclusive(True)
+    def _create_operation_toolbar(self) -> None:
+        toolbar = QToolBar("图像处理", self)
+        toolbar.setMovable(False)
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
 
-        for name, mode in [("线性变换", "linear"), ("对数变换", "log"), ("幂指数变换", "gamma")]:
+        operation_group = QActionGroup(self)
+        operation_group.setExclusive(True)
+        operations = [("灰度变换", 0), ("空间滤波", 1)]
+        for name, page_index in operations:
             action = QAction(name, self)
             action.setCheckable(True)
-            action.triggered.connect(lambda checked, value=mode: self.set_transform_mode(value))
-            group.addAction(action)
-            gray_menu.addAction(action)
-        group.actions()[0].setChecked(True)
-
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(self.menuBar())
-        layout.addWidget(second_menu)
-        self.setMenuWidget(container)
+            action.triggered.connect(
+                lambda checked, index=page_index: self.operation_pages.setCurrentIndex(index)
+            )
+            operation_group.addAction(action)
+            toolbar.addAction(action)
+            if page_index == 0:
+                action.setChecked(True)
 
     @staticmethod
     def _add_action(menu, text: str, slot, shortcut: str | None = None) -> QAction:
