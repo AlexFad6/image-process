@@ -6,11 +6,15 @@ import numpy as np
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QIcon
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
+    QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QStackedWidget,
     QSplitter,
     QStatusBar,
@@ -36,6 +40,8 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(QIcon("app_icon.png"))
 
         self.state = AppState()
+        self.display_mode = "original"
+        self.show_phase_spectrum = False
         self.image_queue: list[tuple[np.ndarray, str]] = []
         self.queue_index = -1
 
@@ -50,6 +56,28 @@ class MainWindow(QMainWindow):
         spatial_filter_layout.addWidget(QLabel("空间滤波"))
         spatial_filter_layout.addStretch()
         self.operation_pages.addWidget(spatial_filter_page)
+
+        frequency_filter_page = QWidget()
+        frequency_filter_layout = QVBoxLayout(frequency_filter_page)
+        frequency_filter_layout.addWidget(QLabel("频域滤波"))
+        self.fft_button = QPushButton("傅里叶变换")
+        self.ifft_button = QPushButton("应用逆变换")
+        self.frequency_filter = QComboBox()
+        self.frequency_filter.addItem("理想滤波", "ideal")
+        self.frequency_filter.addItem("高斯滤波", "gaussian")
+        self.frequency_filter.addItem("巴特沃斯滤波", "butterworth")
+        self.frequency_cutoff = QDoubleSpinBox()
+        self.frequency_cutoff.setRange(1, 10000)
+        self.frequency_cutoff.setValue(30)
+        self.frequency_cutoff.setSingleStep(1)
+        frequency_form = QFormLayout()
+        frequency_form.addRow("滤波器", self.frequency_filter)
+        frequency_form.addRow("cutoff", self.frequency_cutoff)
+        frequency_filter_layout.addWidget(self.fft_button)
+        frequency_filter_layout.addLayout(frequency_form)
+        frequency_filter_layout.addWidget(self.ifft_button)
+        frequency_filter_layout.addStretch()
+        self.operation_pages.addWidget(frequency_filter_page)
 
         self._create_menu_bar()
         self._create_operation_toolbar()
@@ -90,7 +118,15 @@ class MainWindow(QMainWindow):
         self.setStatusBar(QStatusBar())
 
         self.images.convertToGrayRequested.connect(self.convert_to_gray)
+        self.images.displayModeRequested.connect(self.cycle_display_mode)
         self.params.changed.connect(self.apply_params)
+        self.fft_button.clicked.connect(self.compute_fft)
+        self.ifft_button.clicked.connect(self.apply_ifft)
+        self.frequency_filter.currentIndexChanged.connect(self.apply_frequency_filter)
+        self.frequency_cutoff.valueChanged.connect(self.apply_frequency_filter)
+        self.ifft_button.setEnabled(False)
+        self.frequency_filter.setEnabled(False)
+        self.frequency_cutoff.setEnabled(False)
         # 加载默认 cameraman.tif 图像
         self._load_default_image()
         QTimer.singleShot(0, self.images.reset_views)
@@ -124,6 +160,11 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         self._add_action(view_menu, "◀ 上一张", self.previous_image, "Left")
         self._add_action(view_menu, "下一张 ▶", self.next_image, "Right")
+        self.phase_action = QAction("显示相位谱", view_menu)
+        self.phase_action.toggled.connect(self.toggle_phase_spectrum)
+        view_menu.addAction(self.phase_action)
+        self.phase_action.setCheckable(True)
+        self.phase_action.setChecked(False)
 
         implementation_menu = self.menuBar().addMenu("实现方式")
         implementation_group = QActionGroup(self)
@@ -145,12 +186,12 @@ class MainWindow(QMainWindow):
 
         operation_group = QActionGroup(self)
         operation_group.setExclusive(True)
-        operations = [("灰度变换", 0), ("空间滤波", 1)]
+        operations = [("灰度变换", 0), ("空间滤波", 1), ("频域滤波", 2)]
         for name, page_index in operations:
             action = QAction(name, self)
             action.setCheckable(True)
             action.triggered.connect(
-                lambda checked, index=page_index: self.operation_pages.setCurrentIndex(index)
+                lambda checked, index=page_index: self.switch_operation_page(index)
             )
             operation_group.addAction(action)
             toolbar.addAction(action)
@@ -169,6 +210,12 @@ class MainWindow(QMainWindow):
     def toggle_sync_zoom(self, enabled: bool) -> None:
         self.images.set_sync_zoom(enabled)
 
+    def toggle_phase_spectrum(self, enabled: bool) -> None:
+        self.show_phase_spectrum = enabled
+        if not enabled and self.display_mode == "phase":
+            self.display_mode = "gray"
+        self.update_display_mode()
+
     def use_library_backend(self) -> None:
         self.processor = LibraryImageProcessor
         self.apply_params(self.params.params())
@@ -180,6 +227,14 @@ class MainWindow(QMainWindow):
     def set_transform_mode(self, mode: str) -> None:
         self.params.set_mode(mode)
         self.apply_params(self.params.params())
+
+    def switch_operation_page(self, page_index: int) -> None:
+        if page_index != 2 and self.state.frequency_data is not None:
+            self.state.clear_frequency_data()
+            self.images.result.set_image(None, preserve_view=True)
+            self.attributes.set_result(None)
+            self._set_frequency_controls_enabled(False)
+        self.operation_pages.setCurrentIndex(page_index)
 
     def show_about(self):
         QMessageBox.about(
@@ -197,7 +252,7 @@ class MainWindow(QMainWindow):
             return
         grayscale = self.state.source.ndim == 2
         self.params.setEnabled(grayscale)
-        self.images.convert_gray.setEnabled(not grayscale)
+        self.images.convert_gray.setEnabled(True)
         if not grayscale:
             self.statusBar().showMessage("请先点击“转为灰度”按钮以进行灰度处理")
 
@@ -211,12 +266,16 @@ class MainWindow(QMainWindow):
         result_state = self.images.result.get_view_state()
         self.state.source = gray
         self.state.result = None
+        self.state.clear_frequency_data()
+        self._set_frequency_controls_enabled(False)
+        self.display_mode = "gray"
         self.images.original.set_image(gray, preserve_view=True)
         self.images.result.set_image(None, preserve_view=True)
         self.images.original.restore_view_state(original_state)
         self.images.result.restore_view_state(result_state)
         self.attributes.set_original(gray)
         self.attributes.set_result(None)
+        self.images.convert_gray.setText("频谱图")
         self._update_ui_state()
         self.apply_params(self.params.params())
 
@@ -243,14 +302,163 @@ class MainWindow(QMainWindow):
             return
         image, path = self.image_queue[self.queue_index]
         self.state.source = image
+        self.state.gray_source = self.processor.to_gray(image)
         self.state.source_path = path
         self.state.result = None
+        self.state.clear_frequency_data()
+        if self.state.gray_source is not None and self.state.gray_source.ndim == 2:
+            self.state.frequency_data = LibraryImageProcessor.compute_fft(self.state.gray_source)
+            self.state.fft_spectrum_uint8 = (
+                LibraryImageProcessor.compute_fft_display_spectrum(
+                    self.state.frequency_data
+                )
+            )
+            self.state.phase_spectrum_uint8 = (
+                LibraryImageProcessor.compute_fft_phase_spectrum(
+                    self.state.frequency_data
+                )
+            )
+        self._set_frequency_controls_enabled(False)
         self.images.original.set_image(image)
         self.images.result.set_image(None)
         self.attributes.set_original(image)
         self.attributes.set_result(None)
         self._update_ui_state()
         self.statusBar().showMessage(f"{self.queue_index + 1}/{len(self.image_queue)}  {path}")
+        self.display_mode = "original"
+        self.images.convert_gray.setText("灰度图")
+
+    def cycle_display_mode(self) -> None:
+        if self.state.source is None:
+            return
+        if self.display_mode == "original":
+            gray = self.state.gray_source
+            if gray is None:
+                gray = self.processor.to_gray(self.state.source)
+            if gray is None:
+                return
+            self.state.source = gray
+            self.state.gray_source = gray
+            self.state.result = None
+            self._update_ui_state()
+            self.display_mode = "gray"
+        elif self.display_mode == "gray":
+            self.ensure_frequency_cache()
+            self.display_mode = "spectrum"
+        elif self.display_mode == "spectrum":
+            self.display_mode = "phase" if self.show_phase_spectrum else "gray"
+        else:
+            self.display_mode = "gray"
+        self.update_display_mode()
+
+    def ensure_frequency_cache(self) -> None:
+        if self.state.source is None or self.state.source.ndim != 2:
+            return
+        if self.state.frequency_data is None:
+            self.state.frequency_data = LibraryImageProcessor.compute_fft(self.state.source)
+            self.state.fft_spectrum_uint8 = LibraryImageProcessor.compute_fft_display_spectrum(
+                self.state.frequency_data
+            )
+            self.state.phase_spectrum_uint8 = LibraryImageProcessor.compute_fft_phase_spectrum(
+                self.state.frequency_data
+            )
+        if self.state.result is not None and self.state.result.ndim == 2:
+            if self.state.result_frequency_data is None:
+                self.state.result_frequency_data = LibraryImageProcessor.compute_fft(self.state.result)
+                self.state.result_fft_spectrum_uint8 = (
+                    LibraryImageProcessor.compute_fft_display_spectrum(
+                        self.state.result_frequency_data
+                    )
+                )
+                self.state.result_phase_spectrum_uint8 = (
+                    LibraryImageProcessor.compute_fft_phase_spectrum(
+                        self.state.result_frequency_data
+                    )
+                )
+
+    def update_display_mode(self) -> None:
+        if self.state.source is None:
+            return
+        if self.display_mode == "original":
+            source_display = self.state.source
+            result_display = self.state.result
+            next_text = "灰度图"
+        elif self.display_mode == "gray":
+            source_display = self.state.source
+            result_display = self.state.result
+            next_text = "频谱图"
+        else:
+            self.ensure_frequency_cache()
+            if self.display_mode == "phase":
+                source_display = self.state.phase_spectrum_uint8
+                result_display = self.state.result_phase_spectrum_uint8
+                next_text = "灰度图"
+            else:
+                source_display = self.state.fft_spectrum_uint8
+                result_display = self.state.result_fft_spectrum_uint8
+                next_text = "相位谱图" if self.show_phase_spectrum else "灰度图"
+        self.images.original.set_image(source_display, preserve_view=True)
+        self.images.result.set_image(result_display, preserve_view=True)
+        self.images.convert_gray.setText(next_text)
+        self.attributes.set_original(source_display)
+        self.attributes.set_result(result_display)
+
+    def compute_fft(self) -> None:
+        if self.state.source is None:
+            return
+        if self.state.source.ndim != 2:
+            self.statusBar().showMessage("请先将图像转换为灰度图")
+            return
+        self.ensure_frequency_cache()
+        self.display_mode = "spectrum"
+        self.update_display_mode()
+        self.frequency_filter.setEnabled(True)
+        self.frequency_cutoff.setEnabled(True)
+        self.ifft_button.setEnabled(True)
+
+    def apply_frequency_filter(self, *_args) -> None:
+        if self.state.frequency_data is None:
+            return
+        filter_type = self.frequency_filter.currentData()
+        self.state.frequency_data = LibraryImageProcessor.apply_frequency_filter(
+            self.state.frequency_data,
+            filter_type,
+            self.frequency_cutoff.value(),
+        )
+        self.state.fft_spectrum_uint8 = LibraryImageProcessor.compute_fft_display_spectrum(
+            self.state.frequency_data
+        )
+        self.state.phase_spectrum_uint8 = LibraryImageProcessor.compute_fft_phase_spectrum(
+            self.state.frequency_data
+        )
+        self.state.result_frequency_data = None
+        self.state.result_fft_spectrum_uint8 = None
+        self.state.result_phase_spectrum_uint8 = None
+        self.display_mode = "spectrum"
+        self.update_display_mode()
+
+    def apply_ifft(self) -> None:
+        if self.state.frequency_data is None:
+            return
+        reconstructed = LibraryImageProcessor.compute_ifft(self.state.frequency_data)
+        self.state.source = reconstructed
+        self.state.result = None
+        self.state.clear_frequency_data()
+        self.display_mode = "gray"
+        self.images.original.set_image(reconstructed, preserve_view=True)
+        self.images.result.set_image(None, preserve_view=True)
+        self.attributes.set_original(reconstructed)
+        self.attributes.set_result(None)
+        self.frequency_filter.setEnabled(False)
+        self.frequency_cutoff.setEnabled(False)
+        self.ifft_button.setEnabled(False)
+        self._update_ui_state()
+        self.images.convert_gray.setText("频谱图")
+
+    def _set_frequency_controls_enabled(self, enabled: bool) -> None:
+        self.frequency_filter.setEnabled(enabled)
+        self.frequency_cutoff.setEnabled(enabled)
+        self.ifft_button.setEnabled(enabled)
 
     def previous_image(self) -> None:
         if self.queue_index > 0:
@@ -284,15 +492,15 @@ class MainWindow(QMainWindow):
             )
         else:
             raise ValueError(f"Unsupported transform mode: {params.mode}")
+        self.state.result_frequency_data = None
+        self.state.result_fft_spectrum_uint8 = None
+        self.state.result_phase_spectrum_uint8 = None
         original_state = self.images.original.get_view_state()
         result_state = self.images.result.get_view_state()
-        self.images.original.set_image(self.state.source, preserve_view=True)
-        self.images.result.set_image(self.state.result, preserve_view=True)
+        self.update_display_mode()
         self.images.original.restore_view_state(original_state)
         self.images.result.restore_view_state(result_state)
         self.images.sync_views()
-        self.attributes.set_original(self.state.source)
-        self.attributes.set_result(self.state.result)
 
     def save_image(self) -> None:
         if self.state.result is None:

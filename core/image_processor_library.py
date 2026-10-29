@@ -101,3 +101,58 @@ class LibraryImageProcessor:
         if ratio != 50:
             raise ValueError("The library median filter supports ratio=50 only")
         return cv2.medianBlur(image, size)
+
+    @staticmethod
+    def compute_fft(gray_uint8: np.ndarray) -> np.ndarray:
+        """Return the centered OpenCV complex spectrum as float32 HxWx2 data."""
+        gray_float32 = np.asarray(gray_uint8, dtype=np.float32)
+        dft = cv2.dft(gray_float32, flags=cv2.DFT_COMPLEX_OUTPUT)
+        return np.fft.fftshift(dft, axes=(0, 1)).astype(np.float32, copy=False)
+
+    @staticmethod
+    def compute_fft_display_spectrum(dft_shift: np.ndarray) -> np.ndarray:
+        """Return a uint8 magnitude spectrum intended only for display."""
+        magnitude = cv2.magnitude(dft_shift[..., 0], dft_shift[..., 1])
+        spectrum = 20.0 * np.log1p(magnitude)
+        return LibraryImageProcessor.normalize_to_uint8(spectrum)
+
+    @staticmethod
+    def compute_fft_phase_spectrum(dft_shift: np.ndarray) -> np.ndarray:
+        """Return a uint8 phase spectrum intended only for display."""
+        phase = np.arctan2(dft_shift[..., 1], dft_shift[..., 0])
+        phase = (phase + np.pi) * (255.0 / (2.0 * np.pi))
+        return np.clip(phase, 0, 255).astype(np.uint8)
+
+    @staticmethod
+    def apply_frequency_filter(
+        dft_shift: np.ndarray, filter_type: str, cutoff: float
+    ) -> np.ndarray:
+        """Apply an ideal, Gaussian, or Butterworth low-pass transfer function."""
+        if cutoff <= 0:
+            raise ValueError("Frequency cutoff must be greater than zero")
+
+        height, width = dft_shift.shape[:2]
+        y, x = np.ogrid[:height, :width]
+        distance = np.sqrt((x - width / 2) ** 2 + (y - height / 2) ** 2)
+        if filter_type == "ideal":
+            transfer = (distance <= cutoff).astype(np.float32)
+        elif filter_type == "gaussian":
+            transfer = np.exp(-(distance ** 2) / (2 * cutoff ** 2)).astype(np.float32)
+        elif filter_type == "butterworth":
+            order = 2
+            transfer = (1.0 / (1.0 + (distance / cutoff) ** (2 * order))).astype(np.float32)
+        else:
+            raise ValueError(f"Unsupported frequency filter type: {filter_type}")
+
+        transfer_complex = np.repeat(transfer[..., np.newaxis], 2, axis=2)
+        transfer_complex[..., 1] = 0.0
+        return cv2.mulSpectrums(dft_shift, transfer_complex, flags=0)
+
+    @staticmethod
+    def compute_ifft(dft_shift: np.ndarray) -> np.ndarray:
+        """Return the normalized uint8 spatial image reconstructed from a spectrum."""
+        unshifted = np.fft.ifftshift(dft_shift, axes=(0, 1))
+        spatial = cv2.idft(unshifted, flags=cv2.DFT_SCALE | cv2.DFT_REAL_OUTPUT)
+        return LibraryImageProcessor.normalize_to_uint8(np.abs(spatial))
+
+    

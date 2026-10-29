@@ -15,6 +15,7 @@ from .image_view import ImageView
 
 class ImagePanel(QGroupBox):
     convertToGrayRequested = Signal()
+    displayModeRequested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__("图像对比", parent)
@@ -25,9 +26,9 @@ class ImagePanel(QGroupBox):
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.addStretch()
-        self.convert_gray = QPushButton("转为灰度")
-        self.convert_gray.setToolTip("将RGB图像转换为灰度图像")
-        self.convert_gray.clicked.connect(self.convertToGrayRequested.emit)
+        self.convert_gray = QPushButton("灰度图")
+        self.convert_gray.setToolTip("切换原图、灰度图、频谱图和相位谱图")
+        self.convert_gray.clicked.connect(self.displayModeRequested.emit)
         top_layout.addWidget(self.convert_gray)
         outer.addWidget(top_bar)
 
