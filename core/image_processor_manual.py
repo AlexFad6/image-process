@@ -139,3 +139,20 @@ class ManualImageProcessor:
         flattened = windows.reshape(windows.shape[:2] + (size * size,))
         result = np.partition(flattened, index, axis=-1)[..., index]
         return np.ascontiguousarray(result)
+
+    @staticmethod
+    def gaussian_noise(image: np.ndarray, mean: float, std: float) -> np.ndarray:
+        values = np.asarray(image, dtype=np.float32)
+        noise = np.random.default_rng(0).normal(mean, std, values.shape)
+        return np.ascontiguousarray(np.clip(values + noise, 0, 255).astype(np.uint8))
+
+    @staticmethod
+    def salt_pepper_noise(image: np.ndarray, amount: float) -> np.ndarray:
+        values = np.asarray(image, dtype=np.uint8).copy()
+        probability = np.clip(amount, 0, 100) / 100.0
+        rng = np.random.default_rng(0)
+        mask = rng.random(values.shape) < probability
+        salt = rng.random(values.shape) < 0.5
+        values[mask & salt] = 255
+        values[mask & ~salt] = 0
+        return np.ascontiguousarray(values)

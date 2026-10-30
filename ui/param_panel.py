@@ -113,6 +113,8 @@ class ParamPanel(QGroupBox):
             ("Sobel X", "sobel_x"),
             ("Sobel Y", "sobel_y"),
             ("中值滤波", "median"),
+            ("高斯白噪声", "gaussian_noise"),
+            ("椒盐噪声", "salt_pepper_noise"),
         ):
             button = QRadioButton(text, page)
             button.setProperty("filter_type", value)
@@ -135,13 +137,46 @@ class ParamPanel(QGroupBox):
         self.median_ratio.setValue(50)
         self.median_ratio.setSuffix("%")
         self.median_ratio.valueChanged.connect(self._emit_spatial)
-        form.addRow(self.tr("滤波器"), spatial_filters)
+        self.gaussian_mean = QDoubleSpinBox(page)
+        self.gaussian_mean.setRange(-255, 255)
+        self.gaussian_mean.setValue(0)
+        self.gaussian_mean.valueChanged.connect(self._emit_spatial)
+        self.gaussian_std = QDoubleSpinBox(page)
+        self.gaussian_std.setRange(0, 255)
+        self.gaussian_std.setValue(20)
+        self.gaussian_std.valueChanged.connect(self._emit_spatial)
+        self.salt_pepper_amount = QDoubleSpinBox(page)
+        self.salt_pepper_amount.setRange(0, 100)
+        self.salt_pepper_amount.setValue(5)
+        self.salt_pepper_amount.setSuffix("%")
+        self.salt_pepper_amount.valueChanged.connect(self._emit_spatial)
+        form.addRow(spatial_filters)
         form.addRow(self.tr("核大小"), self.kernel_size)
+        self.kernel_size_label = form.labelForField(self.kernel_size)
         self.median_ratio_row = QWidget(page)
         median_ratio_layout = QHBoxLayout(self.median_ratio_row)
         median_ratio_layout.setContentsMargins(0, 0, 0, 0)
         median_ratio_layout.addWidget(self.median_ratio)
         form.addRow(self.tr("中值比例"), self.median_ratio_row)
+        self.median_ratio_label = form.labelForField(self.median_ratio_row)
+        self.gaussian_mean_row = QWidget(page)
+        gaussian_mean_layout = QHBoxLayout(self.gaussian_mean_row)
+        gaussian_mean_layout.setContentsMargins(0, 0, 0, 0)
+        gaussian_mean_layout.addWidget(self.gaussian_mean)
+        form.addRow(self.tr("噪声均值"), self.gaussian_mean_row)
+        self.gaussian_mean_label = form.labelForField(self.gaussian_mean_row)
+        self.gaussian_std_row = QWidget(page)
+        gaussian_std_layout = QHBoxLayout(self.gaussian_std_row)
+        gaussian_std_layout.setContentsMargins(0, 0, 0, 0)
+        gaussian_std_layout.addWidget(self.gaussian_std)
+        form.addRow(self.tr("噪声标准差"), self.gaussian_std_row)
+        self.gaussian_std_label = form.labelForField(self.gaussian_std_row)
+        self.salt_pepper_amount_row = QWidget(page)
+        salt_pepper_layout = QHBoxLayout(self.salt_pepper_amount_row)
+        salt_pepper_layout.setContentsMargins(0, 0, 0, 0)
+        salt_pepper_layout.addWidget(self.salt_pepper_amount)
+        form.addRow(self.tr("噪声比例"), self.salt_pepper_amount_row)
+        self.salt_pepper_amount_label = form.labelForField(self.salt_pepper_amount_row)
         self._sync_spatial_visibility()
         return page
 
@@ -165,7 +200,7 @@ class ParamPanel(QGroupBox):
         self.frequency_cutoff.setRange(1, 10000)
         self.frequency_cutoff.setValue(30)
         self.frequency_cutoff.setSingleStep(1)
-        form.addRow(self.tr("滤波器"), frequency_filters)
+        form.addRow(frequency_filters)
         form.addRow(self.tr("截止频率"), self.frequency_cutoff)
         layout.addLayout(form)
         self.fft_button = QPushButton(page)
@@ -257,9 +292,18 @@ class ParamPanel(QGroupBox):
 
     def _sync_spatial_visibility(self) -> None:
         selected = self.spatial_filter_group.checkedButton()
-        self.median_ratio_row.setVisible(
-            selected is not None and selected.property("filter_type") == "median"
-        )
+        filter_type = selected.property("filter_type") if selected is not None else None
+        show_kernel_size = filter_type in ("mean", "gaussian", "median")
+        self.kernel_size.setVisible(show_kernel_size)
+        self.kernel_size_label.setVisible(show_kernel_size)
+        self.median_ratio_row.setVisible(filter_type == "median")
+        self.median_ratio_label.setVisible(filter_type == "median")
+        self.gaussian_mean_label.setVisible(filter_type == "gaussian_noise")
+        self.gaussian_std_label.setVisible(filter_type == "gaussian_noise")
+        self.salt_pepper_amount_label.setVisible(filter_type == "salt_pepper_noise")
+        self.gaussian_mean_row.setVisible(filter_type == "gaussian_noise")
+        self.gaussian_std_row.setVisible(filter_type == "gaussian_noise")
+        self.salt_pepper_amount_row.setVisible(filter_type == "salt_pepper_noise")
 
     def _set_frequency_controls_enabled(self, enabled: bool) -> None:
         for button in self.frequency_filter_group.buttons():
@@ -284,6 +328,9 @@ class ParamPanel(QGroupBox):
             self.spatial_filter_group.buttons()[0].setChecked(True)
             self.kernel_size.setValue(3)
             self.median_ratio.setValue(50)
+            self.gaussian_mean.setValue(0)
+            self.gaussian_std.setValue(20)
+            self.salt_pepper_amount.setValue(5)
             self._sync_spatial_visibility()
             self._emit_spatial()
         else:
@@ -306,6 +353,9 @@ class ParamPanel(QGroupBox):
             filter_type=self.spatial_filter_group.checkedButton().property("filter_type"),
             kernel_size=self.kernel_size.value(),
             median_ratio=self.median_ratio.value(),
+            gaussian_mean=self.gaussian_mean.value(),
+            gaussian_std=self.gaussian_std.value(),
+            salt_pepper_amount=self.salt_pepper_amount.value(),
         )
 
     def frequency_params(self) -> FrequencyParams:

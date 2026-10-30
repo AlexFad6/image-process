@@ -21,6 +21,9 @@ class SpatialParams:
     filter_type: str = "mean"
     kernel_size: int = 3
     median_ratio: float = 50.0
+    gaussian_mean: float = 0.0
+    gaussian_std: float = 20.0
+    salt_pepper_amount: float = 5.0
 
 
 @dataclass

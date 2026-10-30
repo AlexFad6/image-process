@@ -42,7 +42,15 @@ class ProcessingWorker(QObject):
         try:
             if self.operation == "spatial":
                 processor, image, params = self.payload
-                if params.filter_type == "median":
+                if params.filter_type == "gaussian_noise":
+                    result = processor.gaussian_noise(
+                        image, params.gaussian_mean, params.gaussian_std
+                    )
+                elif params.filter_type == "salt_pepper_noise":
+                    result = processor.salt_pepper_noise(
+                        image, params.salt_pepper_amount
+                    )
+                elif params.filter_type == "median":
                     result = processor.median_filter(
                         image, params.kernel_size, params.median_ratio
                     )
