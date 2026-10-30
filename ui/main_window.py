@@ -25,7 +25,7 @@ from core.image_processor_manual import ManualImageProcessor
 from .attribute_panel import AttributePanel
 from .image_panel import ImagePanel
 from .param_panel import ParamPanel
-from utils import install_language
+from utils import install_language, resource_path
 
 
 class ProcessingWorker(QObject):
@@ -108,7 +108,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("image-process")
         self.resize(1200, 760)
-        self.setWindowIcon(QIcon("app_icon.png"))
+        self.setWindowIcon(QIcon(str(resource_path("app_icon.png"))))
 
         self.state = AppState()
         self.display_mode = "original"
