@@ -4,13 +4,14 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QIcon
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QEvent, QSettings, QTimer, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QLabel,
+    QApplication,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -30,6 +31,7 @@ from core.image_processor_manual import ManualImageProcessor
 from .attribute_panel import AttributePanel
 from .image_panel import ImagePanel
 from .param_panel import ParamPanel
+from utils import install_language
 
 
 class MainWindow(QMainWindow):
@@ -57,15 +59,17 @@ class MainWindow(QMainWindow):
         self.operation_pages.addWidget(self.params)
         spatial_filter_page = QWidget()
         spatial_filter_layout = QVBoxLayout(spatial_filter_page)
-        spatial_filter_layout.addWidget(QLabel("空间滤波"))
+        self.spatial_filter_label = QLabel()
+        spatial_filter_layout.addWidget(self.spatial_filter_label)
         spatial_filter_layout.addStretch()
         self.operation_pages.addWidget(spatial_filter_page)
 
         frequency_filter_page = QWidget()
         frequency_filter_layout = QVBoxLayout(frequency_filter_page)
-        frequency_filter_layout.addWidget(QLabel("频域滤波"))
-        self.fft_button = QPushButton("傅里叶变换")
-        self.ifft_button = QPushButton("应用逆变换")
+        self.frequency_filter_label = QLabel()
+        frequency_filter_layout.addWidget(self.frequency_filter_label)
+        self.fft_button = QPushButton()
+        self.ifft_button = QPushButton()
         self.frequency_filter = QComboBox()
         self.frequency_filter.addItem("理想滤波", "ideal")
         self.frequency_filter.addItem("高斯滤波", "gaussian")
@@ -75,7 +79,9 @@ class MainWindow(QMainWindow):
         self.frequency_cutoff.setValue(30)
         self.frequency_cutoff.setSingleStep(1)
         frequency_form = QFormLayout()
-        frequency_form.addRow("滤波器", self.frequency_filter)
+        self.frequency_form = frequency_form
+        self.frequency_filter_label_text = "滤波器"
+        frequency_form.addRow(self.frequency_filter_label_text, self.frequency_filter)
         frequency_form.addRow("cutoff", self.frequency_cutoff)
         frequency_filter_layout.addWidget(self.fft_button)
         frequency_filter_layout.addLayout(frequency_form)
@@ -179,27 +185,48 @@ class MainWindow(QMainWindow):
         
     def _create_menu_bar(self) -> None:
         file_menu = self.menuBar().addMenu("文件")
-        self._add_action(file_menu, "打开图像", self.open_image, "Ctrl+O")
-        self._add_action(file_menu, "保存当前图像", self.save_image, "Ctrl+S")
-        self._add_action(file_menu, "保存图像序列", self.export_sequence)
+        self.file_menu = file_menu
+        self.open_action = self._add_action(file_menu, "打开图像", self.open_image, "Ctrl+O")
+        self.save_action = self._add_action(file_menu, "保存当前图像", self.save_image, "Ctrl+S")
+        self.export_action = self._add_action(file_menu, "保存图像序列", self.export_sequence)
         file_menu.addSeparator()
-        self._add_action(file_menu, "退出", self.close, "Alt+F4")
+        self.exit_action = self._add_action(file_menu, "退出", self.close, "Alt+F4")
 
         view_menu = self.menuBar().addMenu("视图")
+        self.view_menu = view_menu
         sync_action = self._add_action(view_menu, "同步缩放", self.toggle_sync_zoom)
+        self.sync_action = sync_action
         sync_action.setCheckable(True)
         sync_action.setChecked(True)
-        self._add_action(view_menu, "重置视图", self.images.reset_views)
-        view_menu.addSeparator()
-        self._add_action(view_menu, "◀ 上一张", self.previous_image, "Left")
-        self._add_action(view_menu, "下一张 ▶", self.next_image, "Right")
-        self.phase_action = QAction("显示相位谱", view_menu)
+        self.reset_view_action = self._add_action(view_menu, "重置视图", self.images.reset_views)
+ 
+        options_menu = self.menuBar().addMenu("选项")
+        self.options_menu = options_menu
+        self.phase_action = QAction("显示相位谱", options_menu)
         self.phase_action.toggled.connect(self.toggle_phase_spectrum)
-        view_menu.addAction(self.phase_action)
+        options_menu.addAction(self.phase_action)
         self.phase_action.setCheckable(True)
         self.phase_action.setChecked(False)
+        language_menu = options_menu.addMenu("语言")
+        self.language_menu = language_menu
+        language_group = QActionGroup(language_menu)
+        language_group.setExclusive(True)
+        self.chinese_action = QAction("中文", language_menu)
+        self.english_action = QAction("English", language_menu)
+        for action in (self.chinese_action, self.english_action):
+            action.setCheckable(True)
+            language_group.addAction(action)
+            language_menu.addAction(action)
+        current_language = QSettings(
+            "AlexFad", "image-process"
+        ).value("language", "zh_CN")
+        self.chinese_action.setChecked(current_language.startswith("zh"))
+        self.english_action.setChecked(current_language.startswith("en"))
+        self.chinese_action.triggered.connect(lambda: self.set_language("zh_CN"))
+        self.english_action.triggered.connect(lambda: self.set_language("en_US"))
 
         implementation_menu = self.menuBar().addMenu("实现方式")
+        self.implementation_menu = implementation_menu
         implementation_group = QActionGroup(self)
         implementation_group.setExclusive(True)
         self.library_action = self._add_action(implementation_menu, "库函数", self.use_library_backend)
@@ -210,16 +237,19 @@ class MainWindow(QMainWindow):
         self.library_action.setChecked(True)
 
         help_menu = self.menuBar().addMenu("帮助")
-        self._add_action(help_menu, "关于", self.show_about)
+        self.help_menu = help_menu
+        self.about_action = self._add_action(help_menu, "关于", self.show_about)
 
     def _create_operation_toolbar(self) -> None:
         toolbar = QToolBar("图像处理", self)
+        self.processing_toolbar = toolbar
         toolbar.setMovable(False)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
 
         operation_group = QActionGroup(self)
         operation_group.setExclusive(True)
         operations = [("灰度变换", 0), ("空间滤波", 1), ("频域滤波", 2)]
+        self.operation_actions = {}
         for name, page_index in operations:
             action = QAction(name, self)
             action.setCheckable(True)
@@ -228,8 +258,10 @@ class MainWindow(QMainWindow):
             )
             operation_group.addAction(action)
             toolbar.addAction(action)
+            self.operation_actions[page_index] = action
             if page_index == 0:
                 action.setChecked(True)
+        self.retranslateUi()
 
     @staticmethod
     def _add_action(menu, text: str, slot, shortcut: str | None = None) -> QAction:
@@ -240,6 +272,49 @@ class MainWindow(QMainWindow):
         menu.addAction(action)
         return action
 
+    def retranslateUi(self) -> None:
+        self.setWindowTitle(self.tr("image-process"))
+        self.spatial_filter_label.setText(self.tr("空间滤波"))
+        self.frequency_filter_label.setText(self.tr("频域滤波"))
+        self.fft_button.setText(self.tr("傅里叶变换"))
+        self.ifft_button.setText(self.tr("应用逆变换"))
+        for index, text in enumerate(("理想滤波", "高斯滤波", "巴特沃斯滤波")):
+            self.frequency_filter.setItemText(index, self.tr(text))
+        filter_label = self.frequency_form.labelForField(self.frequency_filter)
+        if filter_label is not None:
+            filter_label.setText(self.tr("滤波器"))
+
+        self.file_menu.setTitle(self.tr("文件"))
+        self.open_action.setText(self.tr("打开图像"))
+        self.save_action.setText(self.tr("保存当前图像"))
+        self.export_action.setText(self.tr("保存图像序列"))
+        self.exit_action.setText(self.tr("退出"))
+        self.view_menu.setTitle(self.tr("视图"))
+        self.sync_action.setText(self.tr("同步缩放"))
+        self.reset_view_action.setText(self.tr("重置视图"))
+        self.options_menu.setTitle(self.tr("选项"))
+        self.phase_action.setText(self.tr("显示相位谱"))
+        self.language_menu.setTitle(self.tr("语言"))
+        self.chinese_action.setText(self.tr("中文"))
+        self.english_action.setText(self.tr("English"))
+        self.implementation_menu.setTitle(self.tr("实现方式"))
+        self.library_action.setText(self.tr("库函数"))
+        self.custom_action.setText(self.tr("自编函数"))
+        self.help_menu.setTitle(self.tr("帮助"))
+        self.about_action.setText(self.tr("关于"))
+        self.processing_toolbar.setWindowTitle(self.tr("图像处理"))
+        self.operation_actions[0].setText(self.tr("灰度变换"))
+        self.operation_actions[1].setText(self.tr("空间滤波"))
+        self.operation_actions[2].setText(self.tr("频域滤波"))
+        self.images.retranslateUi()
+        self.params.retranslateUi()
+        self.attributes.retranslateUi()
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.LanguageChange:
+            self.retranslateUi()
+
     def toggle_sync_zoom(self, enabled: bool) -> None:
         self.images.set_sync_zoom(enabled)
 
@@ -248,6 +323,14 @@ class MainWindow(QMainWindow):
         if not enabled and self.display_mode == "phase":
             self.display_mode = "gray"
         self.update_display_mode()
+
+    def set_language(self, language: str) -> None:
+        QSettings("AlexFad", "image-process").setValue("language", language)
+        app = QApplication.instance()
+        if app is None:
+            return
+        install_language(app, language)
+        self.retranslateUi()
 
     def use_library_backend(self) -> None:
         self.processor = LibraryImageProcessor
@@ -272,10 +355,10 @@ class MainWindow(QMainWindow):
     def show_about(self):
         QMessageBox.about(
             self,
-            "关于 image-process",
-            "图像处理工具\n版本：1.0.0\n\n"
+            self.tr("关于 image-process"),
+            self.tr("图像处理工具\n版本：1.0.0\n\n"
             "GitHub：https://github.com/AlexFad6/image-process\n"
-            "作者：AlexFad",
+            "作者：AlexFad"),
         )
 
     def _update_ui_state(self) -> None:
@@ -287,7 +370,7 @@ class MainWindow(QMainWindow):
         self.params.setEnabled(grayscale)
         self.images.convert_gray.setEnabled(True)
         if not grayscale:
-            self.statusBar().showMessage("请先点击“转为灰度”按钮以进行灰度处理")
+            self.statusBar().showMessage(self.tr("请先点击“转为灰度”按钮以进行灰度处理"))
 
     def convert_to_gray(self) -> None:
         if self.state.source is None:
@@ -308,22 +391,22 @@ class MainWindow(QMainWindow):
         self.images.result.restore_view_state(result_state)
         self.attributes.set_original(gray)
         self.attributes.set_result(None)
-        self.images.convert_gray.setText("频谱图")
+        self.images.convert_gray.setText(self.tr("频谱图"))
         self._update_ui_state()
         self.apply_params(self.params.params())
 
     def open_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "打开图片",
+            self.tr("打开图片"),
             "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)",
+            self.tr("Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)"),
         )
         if not path:
             return
         image = Exporter.read_image(path)
         if image is None:
-            QMessageBox.warning(self, "错误", "无法读取图片")
+            QMessageBox.warning(self, self.tr("错误"), self.tr("无法读取图片"))
             return
 
         self.image_queue.append((image, path))
@@ -359,7 +442,7 @@ class MainWindow(QMainWindow):
         self._update_ui_state()
         self.statusBar().showMessage(f"{self.queue_index + 1}/{len(self.image_queue)}  {path}")
         self.display_mode = "original"
-        self.images.convert_gray.setText("灰度图")
+        self.images.convert_gray.setText(self.tr("灰度图"))
 
     def cycle_display_mode(self) -> None:
         if self.state.source is None:
@@ -437,7 +520,7 @@ class MainWindow(QMainWindow):
                 next_text = "相位谱图" if self.show_phase_spectrum else "灰度图"
         self.images.original.set_image(source_display, preserve_view=True)
         self.images.result.set_image(result_display, preserve_view=True)
-        self.images.convert_gray.setText(next_text)
+        self.images.convert_gray.setText(self.tr(next_text))
         self.attributes.set_original(source_display)
         self.attributes.set_result(result_display)
 
@@ -491,7 +574,7 @@ class MainWindow(QMainWindow):
         self.frequency_cutoff.setEnabled(False)
         self.ifft_button.setEnabled(False)
         self._update_ui_state()
-        self.images.convert_gray.setText("频谱图")
+        self.images.convert_gray.setText(self.tr("频谱图"))
 
     def _set_frequency_controls_enabled(self, enabled: bool) -> None:
         self.frequency_filter.setEnabled(enabled)
@@ -545,7 +628,7 @@ class MainWindow(QMainWindow):
             return
         path, _ = QFileDialog.getSaveFileName(self, "保存图片", "", "PNG (*.png);;JPEG (*.jpg)")
         if path and not Exporter.save_image(path, self.state.result):
-            QMessageBox.warning(self, "错误", "保存失败")
+            QMessageBox.warning(self, self.tr("错误"), self.tr("保存失败"))
 
     def export_sequence(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(self, "选择图片序列", "", "Images (*.png *.jpg *.jpeg *.bmp)")

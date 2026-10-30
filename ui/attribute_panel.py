@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 
 class AttributePanel(QGroupBox):
     def __init__(self, parent=None) -> None:
-        super().__init__("直方图", parent)
+        super().__init__(parent)
         self._images: list[np.ndarray | None] = [None, None]
 
         self.figure_1 = Figure()
@@ -49,6 +49,10 @@ class AttributePanel(QGroupBox):
         charts_layout.addWidget(panel_1)
         charts_layout.addWidget(panel_2)
         layout.addLayout(charts_layout)
+        self.retranslateUi()
+
+    def retranslateUi(self) -> None:
+        self.setTitle(self.tr("直方图"))
 
     def set_image(self, image: np.ndarray | None, *, source: bool = False) -> None:
         self._images[1 if source else 0] = image

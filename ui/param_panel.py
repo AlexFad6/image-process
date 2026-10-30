@@ -24,7 +24,7 @@ class ParamPanel(QGroupBox):
     changed = Signal(object)
 
     def __init__(self, parent=None) -> None:
-        super().__init__("变换参数", parent)
+        super().__init__(parent)
         self.setMinimumWidth(0)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(self)
@@ -38,7 +38,7 @@ class ParamPanel(QGroupBox):
             ("log", "对数变换"),
             ("gamma", "伽马变换"),
         ):
-            action = QAction(text, self)
+            action = QAction(self.tr(text), self)
             action.setCheckable(True)
             action.triggered.connect(lambda checked, mode=value: self.set_mode(mode))
             self.mode_group.addAction(action)
@@ -64,7 +64,7 @@ class ParamPanel(QGroupBox):
         form.addRow(self.d_row)
         form.addRow(self.gamma_row)
 
-        self.reset = QPushButton("重置参数")
+        self.reset = QPushButton()
         layout.addWidget(self.reset)
 
         self._timer = QTimer(self)
@@ -86,6 +86,22 @@ class ParamPanel(QGroupBox):
         self._timer.timeout.connect(self._emit)
 
         self._sync_visibility()
+        self.retranslateUi()
+
+    def retranslateUi(self) -> None:
+        self.setTitle(self.tr("变换参数"))
+        for value, action in self.mode_actions.items():
+            action.setText(self.tr({
+                "linear": "线性变换",
+                "log": "对数变换",
+                "gamma": "伽马变换",
+            }[value]))
+        for label, text in zip(
+            (self.a_row, self.b_row, self.c_row, self.d_row, self.gamma_row),
+            ("a", "b", "c", "d", "gamma"),
+        ):
+            label.findChild(QLabel).setText(self.tr(text))
+        self.reset.setText(self.tr("重置参数"))
 
     @staticmethod
     def _parameter_row(

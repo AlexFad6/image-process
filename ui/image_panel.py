@@ -18,7 +18,7 @@ class ImagePanel(QGroupBox):
     displayModeRequested = Signal()
 
     def __init__(self, parent=None) -> None:
-        super().__init__("图像对比", parent)
+        super().__init__(parent)
         self.sync_zoom = True
 
         outer = QVBoxLayout(self)
@@ -26,8 +26,7 @@ class ImagePanel(QGroupBox):
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.addStretch()
-        self.convert_gray = QPushButton("灰度图")
-        self.convert_gray.setToolTip("切换原图、灰度图、频谱图和相位谱图")
+        self.convert_gray = QPushButton()
         self.convert_gray.clicked.connect(self.displayModeRequested.emit)
         top_layout.addWidget(self.convert_gray)
         outer.addWidget(top_bar)
@@ -44,6 +43,12 @@ class ImagePanel(QGroupBox):
 
         self.original.set_partner(self.result)
         self.result.set_partner(self.original)
+        self.retranslateUi()
+
+    def retranslateUi(self) -> None:
+        self.setTitle(self.tr("图像对比"))
+        self.convert_gray.setText(self.tr("灰度图"))
+        self.convert_gray.setToolTip(self.tr("切换灰度图、频谱图和相位谱图"))
 
     def set_sync_zoom(self, enabled: bool) -> None:
         self.sync_zoom = enabled

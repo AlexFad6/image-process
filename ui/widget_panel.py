@@ -18,4 +18,6 @@ class WidgetPanel(QWidget):
         for text, signal in [("打开图片", self.openRequested), ("保存当前", self.saveRequested),
                              ("序列导出", self.sequenceRequested), ("◀", self.undoRequested),
                              ("▶", self.redoRequested)]:
-            button = QPushButton(text); button.clicked.connect(signal); layout.addWidget(button)
+            button = QPushButton(self.tr(text))
+            button.clicked.connect(signal)
+            layout.addWidget(button)
