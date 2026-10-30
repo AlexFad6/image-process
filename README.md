@@ -15,3 +15,14 @@ Windows PowerShell（建议 Python 3.10+）：
 python -m pip install -r requirements.txt
 python main.py
 ```
+
+### 多语言翻译
+
+翻译源文件位于 `translations/`。安装 PySide6 后运行：
+
+```powershell
+python update_translations.py
+```
+
+该脚本使用 `pyside6-lupdate`（或 `pylupdate6`）提取字符串，并使用
+`pyside6-lrelease` 将 `.ts` 编译为运行时加载的 `.qm` 文件。
