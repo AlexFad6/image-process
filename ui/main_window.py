@@ -240,6 +240,8 @@ class MainWindow(QMainWindow):
             self.attributes.set_result(None)
             self._set_frequency_controls_enabled(False)
         self.params.set_operation(operation)
+        if operation == "spatial":
+            self.apply_spatial_params(self.params.spatial_params())
 
     def retranslateUi(self) -> None:
         self.setWindowTitle(self.tr("image-process"))
@@ -511,6 +513,37 @@ class MainWindow(QMainWindow):
 
     def apply_spatial_params(self, params) -> None:
         self.state.spatial_params = params
+        if self.state.source is None or self.state.source.ndim != 2:
+            return
+
+        if params.filter_type == "median":
+            self.state.result = self.processor.median_filter(
+                self.state.source,
+                params.kernel_size,
+                params.median_ratio,
+            )
+        else:
+            kernel_size = params.kernel_size
+            if kernel_size % 2 == 0:
+                kernel_size += 1
+            kernel = self.processor.gen_filter_kernel(
+                kernel_size,
+                params.filter_type,
+            )
+            self.state.result = self.processor.spatial_filter(
+                self.state.source,
+                kernel,
+            )
+
+        self.state.result_frequency_data = None
+        self.state.result_fft_spectrum_uint8 = None
+        self.state.result_phase_spectrum_uint8 = None
+        original_state = self.images.original.get_view_state()
+        result_state = self.images.result.get_view_state()
+        self.update_display_mode()
+        self.images.original.restore_view_state(original_state)
+        self.images.result.restore_view_state(result_state)
+        self.images.sync_views()
 
     def apply_ifft(self) -> None:
         if self.state.frequency_data is None:

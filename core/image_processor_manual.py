@@ -137,4 +137,5 @@ class ManualImageProcessor:
         windows = np.lib.stride_tricks.sliding_window_view(padded, (size, size))
         index = int(np.clip(ratio, 0, 100) / 100 * (size * size - 1))
         flattened = windows.reshape(windows.shape[:2] + (size * size,))
-        return np.partition(flattened, index, axis=-1)[..., index]
+        result = np.partition(flattened, index, axis=-1)[..., index]
+        return np.ascontiguousarray(result)

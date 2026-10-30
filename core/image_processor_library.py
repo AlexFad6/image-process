@@ -98,9 +98,18 @@ class LibraryImageProcessor:
 
     @staticmethod
     def median_filter(image: np.ndarray, size: int, ratio: float) -> np.ndarray:
-        if ratio != 50:
-            raise ValueError("The library median filter supports ratio=50 only")
-        return cv2.medianBlur(image, size)
+        if size % 2 == 0 or size < 1:
+            raise ValueError("Filter size must be a positive odd number")
+        if ratio == 50:
+            return cv2.medianBlur(image, size)
+        values = np.asarray(image, dtype=np.uint8)
+        radius = size // 2
+        padded = np.pad(values, radius, mode="edge")
+        windows = np.lib.stride_tricks.sliding_window_view(padded, (size, size))
+        index = int(np.clip(ratio, 0, 100) / 100 * (size * size - 1))
+        flattened = windows.reshape(windows.shape[:2] + (size * size,))
+        result = np.partition(flattened, index, axis=-1)[..., index]
+        return np.ascontiguousarray(result)
 
     @staticmethod
     def compute_fft(gray_uint8: np.ndarray) -> np.ndarray:
