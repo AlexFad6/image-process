@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QDoubleSpinBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -59,21 +60,34 @@ class ParamPanel(QGroupBox):
         page = QWidget(self)
         layout = QVBoxLayout(page)
         self.transform_mode_group = QButtonGroup(page)
-        transform_modes = QHBoxLayout()
-        for text, value in (
-            ("线性变换", "linear"),
-            ("对数变换", "log"),
-            ("伽马变换", "gamma"),
+        transform_modes_container = QWidget(page)
+        transform_modes_container.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+        )
+        transform_modes = QGridLayout(transform_modes_container)
+        transform_modes.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        for index, (text, value) in enumerate(
+            (
+                ("线性变换", "linear"),
+                ("对数变换", "log"),
+                ("伽马变换", "gamma"),
+                ("直方图均衡化", "histogram_equalization"),
+            )
         ):
             button = QRadioButton(text, page)
             button.setProperty("mode", value)
             self.transform_mode_group.addButton(button)
-            transform_modes.addWidget(button)
+            row, column = divmod(index, 3)
+            transform_modes.addWidget(button, row, column, Qt.AlignmentFlag.AlignLeft)
         self.transform_mode_group.buttons()[0].setChecked(True)
         self.transform_mode_group.buttonClicked.connect(
             lambda button: self.set_mode(button.property("mode"))
         )
-        layout.addLayout(transform_modes)
+        layout.addWidget(
+            transform_modes_container,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+        )
         form = QFormLayout()
         layout.addLayout(form)
         self.a, self.a_row, self.a_slider = self._parameter_row("a", 0, 255, 0)
@@ -380,7 +394,7 @@ class ParamPanel(QGroupBox):
         return self._transform_mode
 
     def set_mode(self, mode: str) -> None:
-        if mode not in ("linear", "log", "gamma"):
+        if mode not in ("linear", "log", "gamma", "histogram_equalization"):
             raise ValueError(f"Unsupported transform mode: {mode}")
         self.set_operation("gray")
         self._transform_mode = mode
@@ -401,11 +415,17 @@ class ParamPanel(QGroupBox):
             self.b_row.setVisible(False)
             self.d_row.setVisible(False)
             self.gamma_row.setVisible(False)
-        else:
+        elif mode == "gamma":
             self.a_row.setVisible(False)
             self.b_row.setVisible(False)
             self.d_row.setVisible(False)
             self.gamma_row.setVisible(True)
+        else:
+            self.a_row.setVisible(False)
+            self.b_row.setVisible(False)
+            self.c_row.setVisible(False)
+            self.d_row.setVisible(False)
+            self.gamma_row.setVisible(False)
         self._schedule()
 
     def params(self) -> TransformParams:

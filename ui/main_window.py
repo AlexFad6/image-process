@@ -73,6 +73,8 @@ class ProcessingWorker(QObject):
                     result = processor.log_transform(image, params.c)
                 elif params.mode == "gamma":
                     result = processor.gamma_transform(image, params.c, params.gamma)
+                elif params.mode == "histogram_equalization":
+                    result = processor.histogram_equalization(image)
                 else:
                     raise ValueError(f"Unsupported transform mode: {params.mode}")
                 self.finished.emit(result, self.generation)

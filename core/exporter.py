@@ -73,6 +73,8 @@ class Exporter:
                 processed = processor.log_transform(image, params.c)
             elif params.mode == "gamma":
                 processed = processor.gamma_transform(image, params.c, params.gamma)
+            elif params.mode == "histogram_equalization":
+                processed = processor.histogram_equalization(image)
             else:
                 raise ValueError(f"Unsupported transform mode: {params.mode}")
             stem = Path(src_name).stem
