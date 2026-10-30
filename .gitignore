@@ -8,7 +8,6 @@ __pycache__/
 
 # Distribution / packaging
 VisDrone2019*
-.gitignore
 VisDronePlot.py
 test*
 .Python
