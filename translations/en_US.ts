@@ -117,14 +117,12 @@
         <translation>Language</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="298"/>
         <source>中文</source>
-        <translation>Chinese</translation>
+        <translation type="vanished">Chinese</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="299"/>
         <source>English</source>
-        <translation>English</translation>
+        <translation type="vanished">English</translation>
     </message>
     <message>
         <location filename="../ui/main_window.py" line="300"/>

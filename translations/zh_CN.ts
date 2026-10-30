@@ -117,16 +117,6 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="298"/>
-        <source>中文</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location filename="../ui/main_window.py" line="299"/>
-        <source>English</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <location filename="../ui/main_window.py" line="300"/>
         <source>实现方式</source>
         <translation type="unfinished"></translation>
