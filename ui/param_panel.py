@@ -265,7 +265,7 @@ class ParamPanel(QGroupBox):
             self.c.setValue(0)
             self.d.setValue(255)
             self.gamma.setValue(1)
-            self._emit_transform()
+            self._schedule()
         elif operation == "spatial":
             self.spatial_filter_group.buttons()[0].setChecked(True)
             self.kernel_size.setValue(3)

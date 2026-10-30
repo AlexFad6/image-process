@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QIcon
-from PySide6.QtCore import QEvent, QSettings, QTimer, Qt
+from PySide6.QtCore import QEvent, QObject, QSettings, QThread, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QApplication,
@@ -28,6 +28,73 @@ from .param_panel import ParamPanel
 from utils import install_language
 
 
+class ProcessingWorker(QObject):
+    finished = Signal(object, int)
+    failed = Signal(str, int)
+
+    def __init__(self, operation: str, payload: tuple, generation: int) -> None:
+        super().__init__()
+        self.operation = operation
+        self.payload = payload
+        self.generation = generation
+
+    def run(self) -> None:
+        try:
+            if self.operation == "spatial":
+                processor, image, params = self.payload
+                if params.filter_type == "median":
+                    result = processor.median_filter(
+                        image, params.kernel_size, params.median_ratio
+                    )
+                else:
+                    kernel_size = params.kernel_size
+                    if kernel_size % 2 == 0:
+                        kernel_size += 1
+                    kernel = processor.gen_filter_kernel(
+                        kernel_size, params.filter_type
+                    )
+                    result = processor.spatial_filter(image, kernel)
+                self.finished.emit(result, self.generation)
+            elif self.operation == "transform":
+                processor, image, params = self.payload
+                if params.mode == "linear":
+                    result = processor.linear_transform(
+                        image, params.a, params.b, params.c, params.d
+                    )
+                elif params.mode == "log":
+                    result = processor.log_transform(image, params.c)
+                elif params.mode == "gamma":
+                    result = processor.gamma_transform(image, params.c, params.gamma)
+                else:
+                    raise ValueError(f"Unsupported transform mode: {params.mode}")
+                self.finished.emit(result, self.generation)
+            elif self.operation == "fft":
+                image, processor = self.payload
+                frequency_data = processor.compute_fft(image)
+                result = (
+                    frequency_data,
+                    processor.compute_fft_display_spectrum(frequency_data),
+                    processor.compute_fft_phase_spectrum(frequency_data),
+                )
+                self.finished.emit(result, self.generation)
+            elif self.operation == "frequency":
+                frequency_data, params, processor = self.payload
+                filtered = processor.apply_frequency_filter(
+                    frequency_data, params.filter_type, params.cutoff
+                )
+                result = (
+                    filtered,
+                    processor.compute_fft_display_spectrum(filtered),
+                    processor.compute_fft_phase_spectrum(filtered),
+                )
+                self.finished.emit(result, self.generation)
+            elif self.operation == "ifft":
+                frequency_data, processor = self.payload
+                self.finished.emit(processor.compute_ifft(frequency_data), self.generation)
+        except Exception as error:
+            self.failed.emit(str(error), self.generation)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -40,6 +107,8 @@ class MainWindow(QMainWindow):
         self.show_phase_spectrum = False
         self.image_queue: list[tuple[np.ndarray, str]] = []
         self.queue_index = -1
+        self._processing_generation = 0
+        self._processing_jobs: dict[int, tuple[QThread, ProcessingWorker]] = {}
 
         self.images = ImagePanel()
         self.display_mode_timer = QTimer(self)
@@ -47,6 +116,8 @@ class MainWindow(QMainWindow):
         self.display_mode_timer.setInterval(200)
         self.display_mode_timer.timeout.connect(self.cycle_display_mode)
         self.params = ParamPanel()
+        self._pending_spatial = self.params.spatial_params()
+        self._pending_frequency = self.params.frequency_params()
         self.processor = LibraryImageProcessor
         self.attributes = AttributePanel()
 
@@ -122,6 +193,14 @@ class MainWindow(QMainWindow):
         self.params.fftRequested.connect(self.compute_fft)
         self.params.ifftRequested.connect(self.apply_ifft)
         self.params.frequencyChanged.connect(self.apply_frequency_filter)
+        self.spatial_timer = QTimer(self)
+        self.spatial_timer.setSingleShot(True)
+        self.spatial_timer.setInterval(250)
+        self.spatial_timer.timeout.connect(self._run_pending_spatial)
+        self.frequency_timer = QTimer(self)
+        self.frequency_timer.setSingleShot(True)
+        self.frequency_timer.setInterval(250)
+        self.frequency_timer.timeout.connect(self._run_pending_frequency)
         # 加载默认 cameraman.tif 图像
         self._load_default_image()
         QTimer.singleShot(0, self.images.reset_views)
@@ -234,6 +313,7 @@ class MainWindow(QMainWindow):
         self.retranslateUi()
 
     def switch_operation(self, operation: str) -> None:
+        self._processing_generation += 1
         if operation != "frequency" and self.state.frequency_data is not None:
             self.state.clear_frequency_data()
             self.images.result.set_image(None, preserve_view=True)
@@ -369,6 +449,7 @@ class MainWindow(QMainWindow):
     def _show_queue_image(self) -> None:
         if not self.image_queue or self.queue_index < 0:
             return
+        self._processing_generation += 1
         image, path = self.image_queue[self.queue_index]
         self.state.source = image
         self.state.gray_source = self.processor.to_gray(image)
@@ -412,6 +493,9 @@ class MainWindow(QMainWindow):
             self._update_ui_state()
             self.display_mode = "gray"
         elif self.display_mode == "gray":
+            if self.state.frequency_data is None:
+                self.compute_fft()
+                return
             self.ensure_frequency_cache()
             self.display_mode = "spectrum"
         elif self.display_mode == "spectrum":
@@ -483,61 +567,95 @@ class MainWindow(QMainWindow):
         if self.state.source.ndim != 2:
             self.statusBar().showMessage("请先将图像转换为灰度图")
             return
-        self.ensure_frequency_cache()
-        self.display_mode = "spectrum"
-        self.update_display_mode()
-        self.params.set_frequency_controls_enabled(True)
+        if self.state.frequency_data is not None:
+            self.display_mode = "spectrum"
+            self.update_display_mode()
+            self.params.set_frequency_controls_enabled(True)
+            return
+        self._start_processing("fft", (self.state.source.copy(), LibraryImageProcessor))
 
     def apply_frequency_filter(self, params=None) -> None:
         if self.state.frequency_data is None:
             return
         if params is None:
             params = self.params.frequency_params()
+        self._processing_generation += 1
         self.state.frequency_params = params
-        self.state.frequency_data = LibraryImageProcessor.apply_frequency_filter(
-            self.state.frequency_data,
-            params.filter_type,
-            params.cutoff,
-        )
-        self.state.fft_spectrum_uint8 = LibraryImageProcessor.compute_fft_display_spectrum(
-            self.state.frequency_data
-        )
-        self.state.phase_spectrum_uint8 = LibraryImageProcessor.compute_fft_phase_spectrum(
-            self.state.frequency_data
-        )
-        self.state.result_frequency_data = None
-        self.state.result_fft_spectrum_uint8 = None
-        self.state.result_phase_spectrum_uint8 = None
-        self.display_mode = "spectrum"
-        self.update_display_mode()
+        self._pending_frequency = params
+        self.frequency_timer.start()
 
     def apply_spatial_params(self, params) -> None:
+        self._processing_generation += 1
         self.state.spatial_params = params
+        self._pending_spatial = params
+        self.spatial_timer.start()
+
+    def _run_pending_spatial(self) -> None:
         if self.state.source is None or self.state.source.ndim != 2:
             return
+        self._start_processing(
+            "spatial",
+            (self.processor, self.state.source.copy(), self._pending_spatial),
+        )
 
-        if params.filter_type == "median":
-            self.state.result = self.processor.median_filter(
-                self.state.source,
-                params.kernel_size,
-                params.median_ratio,
-            )
-        else:
-            kernel_size = params.kernel_size
-            if kernel_size % 2 == 0:
-                kernel_size += 1
-            kernel = self.processor.gen_filter_kernel(
-                kernel_size,
-                params.filter_type,
-            )
-            self.state.result = self.processor.spatial_filter(
-                self.state.source,
-                kernel,
-            )
+    def _run_pending_frequency(self) -> None:
+        if self.state.frequency_data is None:
+            return
+        self._start_processing(
+            "frequency",
+            (
+                self.state.frequency_data.copy(),
+                self._pending_frequency,
+                LibraryImageProcessor,
+            ),
+        )
 
-        self.state.result_frequency_data = None
-        self.state.result_fft_spectrum_uint8 = None
-        self.state.result_phase_spectrum_uint8 = None
+    def _start_processing(self, operation: str, payload: tuple) -> None:
+        self._processing_generation += 1
+        generation = self._processing_generation
+        thread = QThread(self)
+        worker = ProcessingWorker(operation, payload, generation)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._processing_finished)
+        worker.failed.connect(self._processing_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(lambda: self._processing_jobs.pop(generation, None))
+        self._processing_jobs[generation] = (thread, worker)
+        thread.start()
+
+    def _processing_finished(self, result, generation: int) -> None:
+        if generation != self._processing_generation:
+            return
+        operation = self._processing_jobs[generation][1].operation
+        if operation == "spatial":
+            self.state.result = result
+            self.state.result_frequency_data = None
+            self.state.result_fft_spectrum_uint8 = None
+            self.state.result_phase_spectrum_uint8 = None
+        elif operation == "transform":
+            self._apply_transform_result(result)
+            return
+        elif operation in ("fft", "frequency"):
+            frequency_data, spectrum, phase = result
+            self.state.frequency_data = frequency_data
+            self.state.fft_spectrum_uint8 = spectrum
+            self.state.phase_spectrum_uint8 = phase
+            self.state.result_frequency_data = None
+            self.state.result_fft_spectrum_uint8 = None
+            self.state.result_phase_spectrum_uint8 = None
+            self.display_mode = "spectrum"
+            self.params.set_frequency_controls_enabled(True)
+        elif operation == "ifft":
+            self.state.source = result
+            self.state.result = None
+            self.state.clear_frequency_data()
+            self.display_mode = "gray"
+            self.params.set_frequency_controls_enabled(False)
+            self._update_ui_state()
         original_state = self.images.original.get_view_state()
         result_state = self.images.result.get_view_state()
         self.update_display_mode()
@@ -545,21 +663,17 @@ class MainWindow(QMainWindow):
         self.images.result.restore_view_state(result_state)
         self.images.sync_views()
 
+    def _processing_failed(self, message: str, generation: int) -> None:
+        if generation == self._processing_generation:
+            self.statusBar().showMessage(self.tr("处理失败：") + message)
+
     def apply_ifft(self) -> None:
         if self.state.frequency_data is None:
             return
-        reconstructed = LibraryImageProcessor.compute_ifft(self.state.frequency_data)
-        self.state.source = reconstructed
-        self.state.result = None
-        self.state.clear_frequency_data()
-        self.display_mode = "gray"
-        self.images.original.set_image(reconstructed, preserve_view=True)
-        self.images.result.set_image(None, preserve_view=True)
-        self.attributes.set_original(reconstructed)
-        self.attributes.set_result(None)
-        self.params.set_frequency_controls_enabled(False)
-        self._update_ui_state()
-        self.images.convert_gray.setText(self.tr("频谱图"))
+        self._start_processing(
+            "ifft",
+            (self.state.frequency_data.copy(), LibraryImageProcessor),
+        )
 
     def _set_frequency_controls_enabled(self, enabled: bool) -> None:
         self.params.set_frequency_controls_enabled(enabled)
@@ -582,20 +696,14 @@ class MainWindow(QMainWindow):
             self.attributes.set_result(None)
             return
         self.state.params = params
-        if params.mode == "linear":
-            self.state.result = self.processor.linear_transform(
-                self.state.source, params.a, params.b, params.c, params.d
-            )
-        elif params.mode == "log":
-            self.state.result = self.processor.log_transform(
-                self.state.source, params.c
-            )
-        elif params.mode == "gamma":
-            self.state.result = self.processor.gamma_transform(
-                self.state.source, params.c, params.gamma
-            )
-        else:
-            raise ValueError(f"Unsupported transform mode: {params.mode}")
+        self._processing_generation += 1
+        self._start_processing(
+            "transform",
+            (self.processor, self.state.source.copy(), params),
+        )
+
+    def _apply_transform_result(self, result) -> None:
+        self.state.result = result
         self.state.result_frequency_data = None
         self.state.result_fft_spectrum_uint8 = None
         self.state.result_phase_spectrum_uint8 = None
