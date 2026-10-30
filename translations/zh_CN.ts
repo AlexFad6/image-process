@@ -23,7 +23,7 @@
     </message>
     <message>
         <location filename="../ui/image_panel.py" line="51"/>
-        <source>切换原图、灰度图、频谱图和相位谱图</source>
+        <source>切换灰度图、频谱图和相位谱图</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -36,11 +36,13 @@
     </message>
     <message>
         <location filename="../ui/main_window.py" line="277"/>
+        <location filename="../ui/main_window.py" line="307"/>
         <source>空间滤波</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../ui/main_window.py" line="278"/>
+        <location filename="../ui/main_window.py" line="308"/>
         <source>频域滤波</source>
         <translation type="unfinished"></translation>
     </message>
@@ -155,12 +157,17 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="357"/>
-        <source>关于 image-process</source>
+        <location filename="../ui/main_window.py" line="306"/>
+        <source>灰度变换</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../ui/main_window.py" line="358"/>
+        <source>关于 image-process</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../ui/main_window.py" line="359"/>
         <source>图像处理工具
 版本：1.0.0
 
@@ -169,44 +176,44 @@ GitHub：https://github.com/AlexFad6/image-process
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="372"/>
+        <location filename="../ui/main_window.py" line="373"/>
         <source>请先点击“转为灰度”按钮以进行灰度处理</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="393"/>
-        <location filename="../ui/main_window.py" line="576"/>
+        <location filename="../ui/main_window.py" line="394"/>
+        <location filename="../ui/main_window.py" line="577"/>
         <source>频谱图</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="400"/>
+        <location filename="../ui/main_window.py" line="401"/>
         <source>打开图片</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="402"/>
+        <location filename="../ui/main_window.py" line="403"/>
         <source>Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="408"/>
-        <location filename="../ui/main_window.py" line="630"/>
+        <location filename="../ui/main_window.py" line="409"/>
+        <location filename="../ui/main_window.py" line="631"/>
         <source>错误</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="408"/>
+        <location filename="../ui/main_window.py" line="409"/>
         <source>无法读取图片</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="444"/>
+        <location filename="../ui/main_window.py" line="445"/>
         <source>灰度图</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="630"/>
+        <location filename="../ui/main_window.py" line="631"/>
         <source>保存失败</source>
         <translation type="unfinished"></translation>
     </message>
