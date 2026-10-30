@@ -120,6 +120,9 @@ class ParamPanel(QGroupBox):
             spatial_filters.addWidget(button)
         self.spatial_filter_group.buttons()[0].setChecked(True)
         self.spatial_filter_group.buttonClicked.connect(self._emit_spatial)
+        self.spatial_filter_group.buttonClicked.connect(
+            lambda button: self._sync_spatial_visibility()
+        )
 
         self.kernel_size = QSpinBox(page)
         self.kernel_size.setRange(3, 99)
@@ -134,7 +137,12 @@ class ParamPanel(QGroupBox):
         self.median_ratio.valueChanged.connect(self._emit_spatial)
         form.addRow(self.tr("滤波器"), spatial_filters)
         form.addRow(self.tr("核大小"), self.kernel_size)
-        form.addRow(self.tr("中值比例"), self.median_ratio)
+        self.median_ratio_row = QWidget(page)
+        median_ratio_layout = QHBoxLayout(self.median_ratio_row)
+        median_ratio_layout.setContentsMargins(0, 0, 0, 0)
+        median_ratio_layout.addWidget(self.median_ratio)
+        form.addRow(self.tr("中值比例"), self.median_ratio_row)
+        self._sync_spatial_visibility()
         return page
 
     def _create_frequency_page(self) -> QWidget:
@@ -247,6 +255,12 @@ class ParamPanel(QGroupBox):
         self.d_row.setVisible(mode == "linear")
         self.gamma_row.setVisible(mode == "gamma")
 
+    def _sync_spatial_visibility(self) -> None:
+        selected = self.spatial_filter_group.checkedButton()
+        self.median_ratio_row.setVisible(
+            selected is not None and selected.property("filter_type") == "median"
+        )
+
     def _set_frequency_controls_enabled(self, enabled: bool) -> None:
         for button in self.frequency_filter_group.buttons():
             button.setEnabled(enabled)
@@ -270,6 +284,7 @@ class ParamPanel(QGroupBox):
             self.spatial_filter_group.buttons()[0].setChecked(True)
             self.kernel_size.setValue(3)
             self.median_ratio.setValue(50)
+            self._sync_spatial_visibility()
             self._emit_spatial()
         else:
             self.frequency_filter_group.buttons()[0].setChecked(True)
