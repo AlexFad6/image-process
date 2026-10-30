@@ -6,16 +6,10 @@ import numpy as np
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QIcon
 from PySide6.QtCore import QEvent, QSettings, QTimer, Qt
 from PySide6.QtWidgets import (
-    QComboBox,
-    QDoubleSpinBox,
     QFileDialog,
-    QFormLayout,
-    QLabel,
     QApplication,
     QMainWindow,
     QMessageBox,
-    QPushButton,
-    QStackedWidget,
     QSplitter,
     QStatusBar,
     QSizePolicy,
@@ -55,39 +49,6 @@ class MainWindow(QMainWindow):
         self.params = ParamPanel()
         self.processor = LibraryImageProcessor
         self.attributes = AttributePanel()
-        self.operation_pages = QStackedWidget()
-        self.operation_pages.addWidget(self.params)
-        spatial_filter_page = QWidget()
-        spatial_filter_layout = QVBoxLayout(spatial_filter_page)
-        self.spatial_filter_label = QLabel()
-        spatial_filter_layout.addWidget(self.spatial_filter_label)
-        spatial_filter_layout.addStretch()
-        self.operation_pages.addWidget(spatial_filter_page)
-
-        frequency_filter_page = QWidget()
-        frequency_filter_layout = QVBoxLayout(frequency_filter_page)
-        self.frequency_filter_label = QLabel()
-        frequency_filter_layout.addWidget(self.frequency_filter_label)
-        self.fft_button = QPushButton()
-        self.ifft_button = QPushButton()
-        self.frequency_filter = QComboBox()
-        self.frequency_filter.addItem("理想滤波", "ideal")
-        self.frequency_filter.addItem("高斯滤波", "gaussian")
-        self.frequency_filter.addItem("巴特沃斯滤波", "butterworth")
-        self.frequency_cutoff = QDoubleSpinBox()
-        self.frequency_cutoff.setRange(1, 10000)
-        self.frequency_cutoff.setValue(30)
-        self.frequency_cutoff.setSingleStep(1)
-        frequency_form = QFormLayout()
-        self.frequency_form = frequency_form
-        self.frequency_filter_label_text = "滤波器"
-        frequency_form.addRow(self.frequency_filter_label_text, self.frequency_filter)
-        frequency_form.addRow("cutoff", self.frequency_cutoff)
-        frequency_filter_layout.addWidget(self.fft_button)
-        frequency_filter_layout.addLayout(frequency_form)
-        frequency_filter_layout.addWidget(self.ifft_button)
-        frequency_filter_layout.addStretch()
-        self.operation_pages.addWidget(frequency_filter_page)
 
         self._create_menu_bar()
         self._create_operation_toolbar()
@@ -102,15 +63,15 @@ class MainWindow(QMainWindow):
         self.right_splitter.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
         )
-        self.operation_pages.setMinimumWidth(0)
-        self.operation_pages.setSizePolicy(
+        self.params.setMinimumWidth(0)
+        self.params.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
         )
         self.attributes.setMinimumWidth(0)
         self.attributes.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
         )
-        self.right_splitter.addWidget(self.operation_pages)
+        self.right_splitter.addWidget(self.params)
         self.right_splitter.addWidget(self.attributes)
         self.right_splitter.setSizes([350, 150])
         self.right_splitter.setChildrenCollapsible(False)
@@ -157,13 +118,10 @@ class MainWindow(QMainWindow):
         self.images.convertToGrayRequested.connect(self.convert_to_gray)
         self.images.displayModeRequested.connect(self.schedule_display_mode_switch)
         self.params.changed.connect(self.apply_params)
-        self.fft_button.clicked.connect(self.compute_fft)
-        self.ifft_button.clicked.connect(self.apply_ifft)
-        self.frequency_filter.currentIndexChanged.connect(self.apply_frequency_filter)
-        self.frequency_cutoff.valueChanged.connect(self.apply_frequency_filter)
-        self.ifft_button.setEnabled(False)
-        self.frequency_filter.setEnabled(False)
-        self.frequency_cutoff.setEnabled(False)
+        self.params.spatialChanged.connect(self.apply_spatial_params)
+        self.params.fftRequested.connect(self.compute_fft)
+        self.params.ifftRequested.connect(self.apply_ifft)
+        self.params.frequencyChanged.connect(self.apply_frequency_filter)
         # 加载默认 cameraman.tif 图像
         self._load_default_image()
         QTimer.singleShot(0, self.images.reset_views)
@@ -240,29 +198,6 @@ class MainWindow(QMainWindow):
         self.help_menu = help_menu
         self.about_action = self._add_action(help_menu, "关于", self.show_about)
 
-    def _create_operation_toolbar(self) -> None:
-        toolbar = QToolBar("图像处理", self)
-        self.processing_toolbar = toolbar
-        toolbar.setMovable(False)
-        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
-
-        operation_group = QActionGroup(self)
-        operation_group.setExclusive(True)
-        operations = [("灰度变换", 0), ("空间滤波", 1), ("频域滤波", 2)]
-        self.operation_actions = {}
-        for name, page_index in operations:
-            action = QAction(name, self)
-            action.setCheckable(True)
-            action.triggered.connect(
-                lambda checked, index=page_index: self.switch_operation_page(index)
-            )
-            operation_group.addAction(action)
-            toolbar.addAction(action)
-            self.operation_actions[page_index] = action
-            if page_index == 0:
-                action.setChecked(True)
-        self.retranslateUi()
-
     @staticmethod
     def _add_action(menu, text: str, slot, shortcut: str | None = None) -> QAction:
         action = QAction(text, menu)
@@ -272,18 +207,42 @@ class MainWindow(QMainWindow):
         menu.addAction(action)
         return action
 
+    def _create_operation_toolbar(self) -> None:
+        toolbar = QToolBar("图像处理", self)
+        self.processing_toolbar = toolbar
+        toolbar.setMovable(False)
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
+
+        operation_group = QActionGroup(self)
+        operation_group.setExclusive(True)
+        operations = (
+            ("灰度变换", "gray"),
+            ("空间滤波", "spatial"),
+            ("频域滤波", "frequency"),
+        )
+        self.operation_actions: dict[str, QAction] = {}
+        for text, operation in operations:
+            action = QAction(self.tr(text), self)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda checked, value=operation: self.switch_operation(value)
+            )
+            operation_group.addAction(action)
+            toolbar.addAction(action)
+            self.operation_actions[operation] = action
+        self.operation_actions["gray"].setChecked(True)
+        self.retranslateUi()
+
+    def switch_operation(self, operation: str) -> None:
+        if operation != "frequency" and self.state.frequency_data is not None:
+            self.state.clear_frequency_data()
+            self.images.result.set_image(None, preserve_view=True)
+            self.attributes.set_result(None)
+            self._set_frequency_controls_enabled(False)
+        self.params.set_operation(operation)
+
     def retranslateUi(self) -> None:
         self.setWindowTitle(self.tr("image-process"))
-        self.spatial_filter_label.setText(self.tr("空间滤波"))
-        self.frequency_filter_label.setText(self.tr("频域滤波"))
-        self.fft_button.setText(self.tr("傅里叶变换"))
-        self.ifft_button.setText(self.tr("应用逆变换"))
-        for index, text in enumerate(("理想滤波", "高斯滤波", "巴特沃斯滤波")):
-            self.frequency_filter.setItemText(index, self.tr(text))
-        filter_label = self.frequency_form.labelForField(self.frequency_filter)
-        if filter_label is not None:
-            filter_label.setText(self.tr("滤波器"))
-
         self.file_menu.setTitle(self.tr("文件"))
         self.open_action.setText(self.tr("打开图像"))
         self.save_action.setText(self.tr("保存当前图像"))
@@ -303,9 +262,9 @@ class MainWindow(QMainWindow):
         self.help_menu.setTitle(self.tr("帮助"))
         self.about_action.setText(self.tr("关于"))
         self.processing_toolbar.setWindowTitle(self.tr("图像处理"))
-        self.operation_actions[0].setText(self.tr("灰度变换"))
-        self.operation_actions[1].setText(self.tr("空间滤波"))
-        self.operation_actions[2].setText(self.tr("频域滤波"))
+        self.operation_actions["gray"].setText(self.tr("灰度变换"))
+        self.operation_actions["spatial"].setText(self.tr("空间滤波"))
+        self.operation_actions["frequency"].setText(self.tr("频域滤波"))
         self.images.retranslateUi()
         self.params.retranslateUi()
         self.attributes.retranslateUi()
@@ -343,14 +302,6 @@ class MainWindow(QMainWindow):
     def set_transform_mode(self, mode: str) -> None:
         self.params.set_mode(mode)
         self.apply_params(self.params.params())
-
-    def switch_operation_page(self, page_index: int) -> None:
-        if page_index != 2 and self.state.frequency_data is not None:
-            self.state.clear_frequency_data()
-            self.images.result.set_image(None, preserve_view=True)
-            self.attributes.set_result(None)
-            self._set_frequency_controls_enabled(False)
-        self.operation_pages.setCurrentIndex(page_index)
 
     def show_about(self):
         QMessageBox.about(
@@ -533,18 +484,18 @@ class MainWindow(QMainWindow):
         self.ensure_frequency_cache()
         self.display_mode = "spectrum"
         self.update_display_mode()
-        self.frequency_filter.setEnabled(True)
-        self.frequency_cutoff.setEnabled(True)
-        self.ifft_button.setEnabled(True)
+        self.params.set_frequency_controls_enabled(True)
 
-    def apply_frequency_filter(self, *_args) -> None:
+    def apply_frequency_filter(self, params=None) -> None:
         if self.state.frequency_data is None:
             return
-        filter_type = self.frequency_filter.currentData()
+        if params is None:
+            params = self.params.frequency_params()
+        self.state.frequency_params = params
         self.state.frequency_data = LibraryImageProcessor.apply_frequency_filter(
             self.state.frequency_data,
-            filter_type,
-            self.frequency_cutoff.value(),
+            params.filter_type,
+            params.cutoff,
         )
         self.state.fft_spectrum_uint8 = LibraryImageProcessor.compute_fft_display_spectrum(
             self.state.frequency_data
@@ -558,6 +509,9 @@ class MainWindow(QMainWindow):
         self.display_mode = "spectrum"
         self.update_display_mode()
 
+    def apply_spatial_params(self, params) -> None:
+        self.state.spatial_params = params
+
     def apply_ifft(self) -> None:
         if self.state.frequency_data is None:
             return
@@ -570,16 +524,12 @@ class MainWindow(QMainWindow):
         self.images.result.set_image(None, preserve_view=True)
         self.attributes.set_original(reconstructed)
         self.attributes.set_result(None)
-        self.frequency_filter.setEnabled(False)
-        self.frequency_cutoff.setEnabled(False)
-        self.ifft_button.setEnabled(False)
+        self.params.set_frequency_controls_enabled(False)
         self._update_ui_state()
         self.images.convert_gray.setText(self.tr("频谱图"))
 
     def _set_frequency_controls_enabled(self, enabled: bool) -> None:
-        self.frequency_filter.setEnabled(enabled)
-        self.frequency_cutoff.setEnabled(enabled)
-        self.ifft_button.setEnabled(enabled)
+        self.params.set_frequency_controls_enabled(enabled)
 
     def previous_image(self) -> None:
         if self.queue_index > 0:
