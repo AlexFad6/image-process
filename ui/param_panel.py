@@ -3,13 +3,14 @@ from __future__ import annotations
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
-    QComboBox,
+    QButtonGroup,
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QRadioButton,
     QSlider,
     QSpinBox,
     QStackedWidget,
@@ -57,14 +58,22 @@ class ParamPanel(QGroupBox):
     def _create_transform_page(self) -> QWidget:
         page = QWidget(self)
         layout = QVBoxLayout(page)
-        self.transform_mode_combo = QComboBox(page)
+        self.transform_mode_group = QButtonGroup(page)
+        transform_modes = QHBoxLayout()
         for text, value in (
             ("线性变换", "linear"),
             ("对数变换", "log"),
             ("伽马变换", "gamma"),
         ):
-            self.transform_mode_combo.addItem(text, value)
-        layout.addWidget(self.transform_mode_combo)
+            button = QRadioButton(text, page)
+            button.setProperty("mode", value)
+            self.transform_mode_group.addButton(button)
+            transform_modes.addWidget(button)
+        self.transform_mode_group.buttons()[0].setChecked(True)
+        self.transform_mode_group.buttonClicked.connect(
+            lambda button: self.set_mode(button.property("mode"))
+        )
+        layout.addLayout(transform_modes)
         form = QFormLayout()
         layout.addLayout(form)
         self.a, self.a_row, self.a_slider = self._parameter_row("a", 0, 255, 0)
@@ -86,14 +95,14 @@ class ParamPanel(QGroupBox):
             self.gamma_slider,
         ):
             slider.valueChanged.connect(self._schedule)
-        self.transform_mode_combo.currentIndexChanged.connect(self._set_transform_mode)
         self._sync_transform_visibility()
         return page
 
     def _create_spatial_page(self) -> QWidget:
         page = QWidget(self)
         form = QFormLayout(page)
-        self.spatial_filter = QComboBox(page)
+        self.spatial_filter_group = QButtonGroup(page)
+        spatial_filters = QVBoxLayout()
         for text, value in (
             ("均值滤波", "mean"),
             ("高斯滤波", "gaussian"),
@@ -103,9 +112,14 @@ class ParamPanel(QGroupBox):
             ("Roberts", "roberts"),
             ("Sobel X", "sobel_x"),
             ("Sobel Y", "sobel_y"),
+            ("中值滤波", "median"),
         ):
-            self.spatial_filter.addItem(text, value)
-        self.spatial_filter.currentIndexChanged.connect(self._emit_spatial)
+            button = QRadioButton(text, page)
+            button.setProperty("filter_type", value)
+            self.spatial_filter_group.addButton(button)
+            spatial_filters.addWidget(button)
+        self.spatial_filter_group.buttons()[0].setChecked(True)
+        self.spatial_filter_group.buttonClicked.connect(self._emit_spatial)
 
         self.kernel_size = QSpinBox(page)
         self.kernel_size.setRange(3, 99)
@@ -118,7 +132,7 @@ class ParamPanel(QGroupBox):
         self.median_ratio.setValue(50)
         self.median_ratio.setSuffix("%")
         self.median_ratio.valueChanged.connect(self._emit_spatial)
-        form.addRow(self.tr("滤波器"), self.spatial_filter)
+        form.addRow(self.tr("滤波器"), spatial_filters)
         form.addRow(self.tr("核大小"), self.kernel_size)
         form.addRow(self.tr("中值比例"), self.median_ratio)
         return page
@@ -127,18 +141,23 @@ class ParamPanel(QGroupBox):
         page = QWidget(self)
         layout = QVBoxLayout(page)
         form = QFormLayout()
-        self.frequency_filter = QComboBox(page)
+        self.frequency_filter_group = QButtonGroup(page)
+        frequency_filters = QHBoxLayout()
         for text, value in (
             ("理想滤波", "ideal"),
             ("高斯滤波", "gaussian"),
             ("巴特沃斯滤波", "butterworth"),
         ):
-            self.frequency_filter.addItem(text, value)
+            button = QRadioButton(text, page)
+            button.setProperty("filter_type", value)
+            self.frequency_filter_group.addButton(button)
+            frequency_filters.addWidget(button)
+        self.frequency_filter_group.buttons()[0].setChecked(True)
         self.frequency_cutoff = QDoubleSpinBox(page)
         self.frequency_cutoff.setRange(1, 10000)
         self.frequency_cutoff.setValue(30)
         self.frequency_cutoff.setSingleStep(1)
-        form.addRow(self.tr("滤波器"), self.frequency_filter)
+        form.addRow(self.tr("滤波器"), frequency_filters)
         form.addRow(self.tr("截止频率"), self.frequency_cutoff)
         layout.addLayout(form)
         self.fft_button = QPushButton(page)
@@ -146,7 +165,7 @@ class ParamPanel(QGroupBox):
         layout.addWidget(self.fft_button)
         layout.addWidget(self.ifft_button)
         layout.addStretch()
-        self.frequency_filter.currentIndexChanged.connect(self._emit_frequency)
+        self.frequency_filter_group.buttonClicked.connect(self._emit_frequency)
         self.frequency_cutoff.valueChanged.connect(self._emit_frequency)
         self.fft_button.clicked.connect(self.fftRequested)
         self.ifft_button.clicked.connect(self.ifftRequested)
@@ -160,8 +179,6 @@ class ParamPanel(QGroupBox):
             ("a", "b", "c", "d", "gamma"),
         ):
             label.findChild(QLabel).setText(self.tr(text))
-        for index, text in enumerate(("线性变换", "对数变换", "伽马变换")):
-            self.transform_mode_combo.setItemText(index, self.tr(text))
         self.reset.setText(self.tr("重置参数"))
         self.fft_button.setText(self.tr("傅里叶变换"))
         self.ifft_button.setText(self.tr("应用逆变换"))
@@ -231,7 +248,8 @@ class ParamPanel(QGroupBox):
         self.gamma_row.setVisible(mode == "gamma")
 
     def _set_frequency_controls_enabled(self, enabled: bool) -> None:
-        self.frequency_filter.setEnabled(enabled)
+        for button in self.frequency_filter_group.buttons():
+            button.setEnabled(enabled)
         self.frequency_cutoff.setEnabled(enabled)
         self.ifft_button.setEnabled(enabled)
 
@@ -249,12 +267,12 @@ class ParamPanel(QGroupBox):
             self.gamma.setValue(1)
             self._emit_transform()
         elif operation == "spatial":
-            self.spatial_filter.setCurrentIndex(0)
+            self.spatial_filter_group.buttons()[0].setChecked(True)
             self.kernel_size.setValue(3)
             self.median_ratio.setValue(50)
             self._emit_spatial()
         else:
-            self.frequency_filter.setCurrentIndex(0)
+            self.frequency_filter_group.buttons()[0].setChecked(True)
             self.frequency_cutoff.setValue(30)
             self._emit_frequency()
 
@@ -270,14 +288,14 @@ class ParamPanel(QGroupBox):
 
     def spatial_params(self) -> SpatialParams:
         return SpatialParams(
-            filter_type=self.spatial_filter.currentData(),
+            filter_type=self.spatial_filter_group.checkedButton().property("filter_type"),
             kernel_size=self.kernel_size.value(),
             median_ratio=self.median_ratio.value(),
         )
 
     def frequency_params(self) -> FrequencyParams:
         return FrequencyParams(
-            filter_type=self.frequency_filter.currentData(),
+            filter_type=self.frequency_filter_group.checkedButton().property("filter_type"),
             cutoff=self.frequency_cutoff.value(),
         )
 
@@ -289,7 +307,8 @@ class ParamPanel(QGroupBox):
             raise ValueError(f"Unsupported operation: {operation}")
         self.pages.setCurrentIndex(("gray", "spatial", "frequency").index(operation))
         self._set_frequency_controls_enabled(
-            operation == "frequency" and self.frequency_filter.isEnabled()
+            operation == "frequency"
+            and self.frequency_filter_group.buttons()[0].isEnabled()
         )
 
     def transform_mode(self) -> str:
@@ -300,11 +319,10 @@ class ParamPanel(QGroupBox):
             raise ValueError(f"Unsupported transform mode: {mode}")
         self.set_operation("gray")
         self._transform_mode = mode
-        self.transform_mode_combo.blockSignals(True)
-        self.transform_mode_combo.setCurrentIndex(
-            self.transform_mode_combo.findData(mode)
-        )
-        self.transform_mode_combo.blockSignals(False)
+        for button in self.transform_mode_group.buttons():
+            if button.property("mode") == mode:
+                button.setChecked(True)
+                break
         self._sync_transform_visibility()
         if mode in ("log", "gamma") and self.c.value() == 0:
             self.c.setValue(1)
@@ -324,11 +342,6 @@ class ParamPanel(QGroupBox):
             self.d_row.setVisible(False)
             self.gamma_row.setVisible(True)
         self._schedule()
-
-    def _set_transform_mode(self, index: int) -> None:
-        mode = self.transform_mode_combo.itemData(index)
-        if mode is not None:
-            self.set_mode(mode)
 
     def params(self) -> TransformParams:
         return self.transform_params()
