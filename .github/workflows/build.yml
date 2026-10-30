@@ -41,7 +41,7 @@ jobs:
         run: python update_translations.py
 
       - name: Build with PyInstaller
-        run: pyinstaller --clean --noconfirm --onefile --name "${{ matrix.build_name }}" --add-data "app_icon.png${{ matrix.os == 'windows-latest' && ';' || ':' }}." --add-data "translations${{ matrix.os == 'windows-latest' && ';' || ':' }}translations" main.py
+        run: pyinstaller --clean --noconfirm --noconsole --onefile --icon app_icon.ico --name "${{ matrix.build_name }}" --add-data "app_icon.png${{ matrix.os == 'windows-latest' && ';' || ':' }}." --add-data "translations${{ matrix.os == 'windows-latest' && ';' || ':' }}translations" main.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
