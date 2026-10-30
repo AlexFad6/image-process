@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
-    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -18,6 +17,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QSplitter,
     QStatusBar,
+    QSizePolicy,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -46,6 +46,10 @@ class MainWindow(QMainWindow):
         self.queue_index = -1
 
         self.images = ImagePanel()
+        self.display_mode_timer = QTimer(self)
+        self.display_mode_timer.setSingleShot(True)
+        self.display_mode_timer.setInterval(200)
+        self.display_mode_timer.timeout.connect(self.cycle_display_mode)
         self.params = ParamPanel()
         self.processor = LibraryImageProcessor
         self.attributes = AttributePanel()
@@ -83,12 +87,26 @@ class MainWindow(QMainWindow):
         self._create_operation_toolbar()
 
         side = QWidget()
+        side.setMinimumWidth(0)
+        side.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         side_layout = QVBoxLayout(side)
         side_layout.setContentsMargins(5, 5, 5, 5)
         self.right_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.right_splitter.setMinimumWidth(0)
+        self.right_splitter.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
+        )
+        self.operation_pages.setMinimumWidth(0)
+        self.operation_pages.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
+        )
+        self.attributes.setMinimumWidth(0)
+        self.attributes.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
+        )
         self.right_splitter.addWidget(self.operation_pages)
         self.right_splitter.addWidget(self.attributes)
-        self.right_splitter.setSizes([400, 100])
+        self.right_splitter.setSizes([350, 150])
         self.right_splitter.setChildrenCollapsible(False)
         self.right_splitter.setHandleWidth(8)
         self.right_splitter.setStyleSheet(
@@ -109,16 +127,29 @@ class MainWindow(QMainWindow):
         left_layout.setSpacing(0)
         left_layout.addWidget(self.images, 1)
 
-        content = QWidget()
-        content_layout = QHBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.addWidget(left, 2)
-        content_layout.addWidget(side, 1)
-        self.setCentralWidget(content)
+        content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        content_splitter.addWidget(left)
+        content_splitter.addWidget(side)
+        content_splitter.setSizes([700, 300])
+        content_splitter.setStretchFactor(0, 1)
+        content_splitter.setStretchFactor(1, 0)
+        content_splitter.setChildrenCollapsible(False)
+        content_splitter.setHandleWidth(8)
+        content_splitter.setStyleSheet(
+            """
+            QSplitter::handle {
+                background-color: #d4d4d4;
+            }
+            QSplitter::handle:pressed {
+                background-color: #a0a0a0;
+            }
+            """
+        )
+        self.setCentralWidget(content_splitter)
         self.setStatusBar(QStatusBar())
 
         self.images.convertToGrayRequested.connect(self.convert_to_gray)
-        self.images.displayModeRequested.connect(self.cycle_display_mode)
+        self.images.displayModeRequested.connect(self.schedule_display_mode_switch)
         self.params.changed.connect(self.apply_params)
         self.fft_button.clicked.connect(self.compute_fft)
         self.ifft_button.clicked.connect(self.apply_ifft)
@@ -143,6 +174,8 @@ class MainWindow(QMainWindow):
         self._show_queue_image()
         # 两侧图像视图同步
         self._update_ui_state()
+        if self.state.source is not None and self.state.source.ndim == 2:
+            self.apply_params(self.params.params())
         
     def _create_menu_bar(self) -> None:
         file_menu = self.menuBar().addMenu("文件")
@@ -350,6 +383,11 @@ class MainWindow(QMainWindow):
         else:
             self.display_mode = "gray"
         self.update_display_mode()
+
+    def schedule_display_mode_switch(self) -> None:
+        # Restart the debounce window on every click.
+        self.display_mode_timer.stop()
+        self.display_mode_timer.start()
 
     def ensure_frequency_cache(self) -> None:
         if self.state.source is None or self.state.source.ndim != 2:

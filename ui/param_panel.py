@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QSlider,
+    QSizePolicy,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -24,6 +25,8 @@ class ParamPanel(QGroupBox):
 
     def __init__(self, parent=None) -> None:
         super().__init__("变换参数", parent)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(self)
         self.mode_toolbar = QToolBar("模式", self)
         self.mode_toolbar.setMovable(False)
@@ -66,7 +69,7 @@ class ParamPanel(QGroupBox):
 
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
-        self._timer.setInterval(100)
+        self._timer.setInterval(200)
 
         for widget in (self.a, self.b, self.c, self.d, self.gamma):
             widget.valueChanged.connect(self._schedule)
