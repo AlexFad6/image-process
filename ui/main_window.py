@@ -78,6 +78,12 @@ class ProcessingWorker(QObject):
                 processor, image, params = self.payload
                 result = processor.geometric_transform(image, params.transform_type)
                 self.finished.emit(result, self.generation)
+            elif self.operation == "binarization":
+                processor, image, params = self.payload
+                result = processor.binarize(
+                    image, params.method, params.threshold, params.block_size, params.c
+                )
+                self.finished.emit(result, self.generation)
             elif self.operation == "transform":
                 processor, image, params = self.payload
                 if params.mode == "linear":
@@ -219,6 +225,7 @@ class MainWindow(QMainWindow):
         self.params.changed.connect(self.apply_params)
         self.params.spatialChanged.connect(self.apply_spatial_params)
         self.params.geometryChanged.connect(self.apply_geometry_params)
+        self.params.binarizationChanged.connect(self.apply_binarization_params)
         self.params.fftRequested.connect(self.compute_fft)
         self.params.ifftRequested.connect(self.apply_ifft)
         self.params.magnitudeIfftRequested.connect(
@@ -332,6 +339,7 @@ class MainWindow(QMainWindow):
             ("空间滤波", "spatial"),
             ("频域滤波", "frequency"),
             ("几何变换", "geometry"),
+            ("二值化", "binarization"),
         )
         self.operation_actions: dict[str, QAction] = {}
         for text, operation in operations:
@@ -358,6 +366,8 @@ class MainWindow(QMainWindow):
             self.apply_spatial_params(self.params.spatial_params())
         elif operation == "geometry":
             self.apply_geometry_params(self.params.geometry_params())
+        elif operation == "binarization":
+            self.apply_binarization_params(self.params.binarization_params())
 
     def retranslateUi(self) -> None:
         self.setWindowTitle(self.tr("image-process"))
@@ -384,6 +394,7 @@ class MainWindow(QMainWindow):
         self.operation_actions["spatial"].setText(self.tr("空间滤波"))
         self.operation_actions["frequency"].setText(self.tr("频域滤波"))
         self.operation_actions["geometry"].setText(self.tr("几何变换"))
+        self.operation_actions["binarization"].setText(self.tr("二值化"))
         self.images.retranslateUi()
         self.params.retranslateUi()
         self.attributes.retranslateUi()
@@ -637,6 +648,16 @@ class MainWindow(QMainWindow):
             (self.processor, self.state.source.copy(), params),
         )
 
+    def apply_binarization_params(self, params) -> None:
+        if self.state.source is None or self.state.source.ndim != 2:
+            return
+        self._processing_generation += 1
+        self.state.binarization_params = params
+        self._start_processing(
+            "binarization",
+            (self.processor, self.state.source.copy(), params),
+        )
+
     def _run_pending_spatial(self) -> None:
         if self.state.source is None or self.state.source.ndim != 2:
             return
@@ -686,6 +707,12 @@ class MainWindow(QMainWindow):
         elif operation == "geometry":
             self.state.result = result
             self.state.clear_frequency_data()
+            self.state.result_frequency_data = None
+            self.state.result_fft_spectrum_uint8 = None
+            self.state.result_phase_spectrum_uint8 = None
+            self.display_mode = "original"
+        elif operation == "binarization":
+            self.state.result = result
             self.state.result_frequency_data = None
             self.state.result_fft_spectrum_uint8 = None
             self.state.result_phase_spectrum_uint8 = None

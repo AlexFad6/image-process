@@ -217,3 +217,42 @@ class ManualImageProcessor:
         if transform_type == "flip_vertical":
             return np.flip(image, axis=0).copy()
         raise ValueError(f"Unsupported geometric transform: {transform_type}")
+
+    @staticmethod
+    def binarize(
+        image: np.ndarray, method: str, threshold: float, block_size: int, c: float
+    ) -> np.ndarray:
+        values = np.asarray(image, dtype=np.uint8)
+        if method == "manual":
+            return np.where(values > threshold, 255, 0).astype(np.uint8)
+        if method == "otsu":
+            hist = np.bincount(values.ravel(), minlength=256).astype(np.float64)
+            total = values.size
+            cumulative_weight = np.cumsum(hist)
+            cumulative_mean = np.cumsum(hist * np.arange(256))
+            denominator = cumulative_weight * (total - cumulative_weight)
+            score = np.zeros(256, dtype=np.float64)
+            valid = denominator > 0
+            score[valid] = (
+                (total * cumulative_mean[valid]
+                 - cumulative_weight[valid] * cumulative_mean[-1]) ** 2
+                / denominator[valid]
+            )
+            return np.where(values > int(np.argmax(score)), 255, 0).astype(np.uint8)
+        if block_size < 3 or block_size % 2 == 0:
+            raise ValueError("Adaptive threshold block size must be a positive odd number")
+        radius = block_size // 2
+        padded = np.pad(values.astype(np.float32), radius, mode="reflect")
+        windows = np.lib.stride_tricks.sliding_window_view(
+            padded, (block_size, block_size)
+        )
+        if method == "adaptive_mean":
+            local = windows.mean(axis=(-2, -1))
+        elif method == "adaptive_gaussian":
+            axis = np.arange(-radius, radius + 1, dtype=np.float32)
+            kernel = np.exp(-(axis ** 2) / (2 * (block_size / 6) ** 2))
+            kernel /= kernel.sum()
+            local = np.einsum("i,j,hwij->hw", kernel, kernel, windows)
+        else:
+            raise ValueError(f"Unsupported binarization method: {method}")
+        return np.where(values > local - c, 255, 0).astype(np.uint8)

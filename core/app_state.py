@@ -41,6 +41,14 @@ class GeometryParams:
 
 
 @dataclass
+class BinarizationParams:
+    method: str = "manual"
+    threshold: float = 128.0
+    block_size: int = 11
+    c: float = 2.0
+
+
+@dataclass
 class AppState:
     source: Optional[np.ndarray] = None
     gray_source: Optional[np.ndarray] = None
@@ -50,6 +58,7 @@ class AppState:
     spatial_params: SpatialParams = field(default_factory=SpatialParams)
     frequency_params: FrequencyParams = field(default_factory=FrequencyParams)
     geometry_params: GeometryParams = field(default_factory=GeometryParams)
+    binarization_params: BinarizationParams = field(default_factory=BinarizationParams)
     operation_log: list[dict] = field(default_factory=list)
     frequency_data: Optional[np.ndarray] = None
     fft_spectrum_uint8: Optional[np.ndarray] = None
@@ -67,6 +76,7 @@ class AppState:
         self.spatial_params = SpatialParams()
         self.frequency_params = FrequencyParams()
         self.geometry_params = GeometryParams()
+        self.binarization_params = BinarizationParams()
         self.operation_log.clear()
         self.clear_frequency_data()
 

@@ -20,7 +20,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core.app_state import FrequencyParams, GeometryParams, SpatialParams, TransformParams
+from core.app_state import (
+    BinarizationParams,
+    FrequencyParams,
+    GeometryParams,
+    SpatialParams,
+    TransformParams,
+)
 
 
 class ParamPanel(QGroupBox):
@@ -28,6 +34,7 @@ class ParamPanel(QGroupBox):
     spatialChanged = Signal(object)
     frequencyChanged = Signal(object)
     geometryChanged = Signal(object)
+    binarizationChanged = Signal(object)
     fftRequested = Signal()
     ifftRequested = Signal()
     magnitudeIfftRequested = Signal()
@@ -46,11 +53,13 @@ class ParamPanel(QGroupBox):
         self.spatial_page = self._create_spatial_page()
         self.frequency_page = self._create_frequency_page()
         self.geometry_page = self._create_geometry_page()
+        self.binarization_page = self._create_binarization_page()
         for page in (
             self.transform_page,
             self.spatial_page,
             self.frequency_page,
             self.geometry_page,
+            self.binarization_page,
         ):
             self.pages.addWidget(page)
         layout.addWidget(self.pages)
@@ -297,6 +306,52 @@ class ParamPanel(QGroupBox):
         layout.addStretch()
         return page
 
+    def _create_binarization_page(self) -> QWidget:
+        page = QWidget(self)
+        form = QFormLayout(page)
+        self.binarization_group = QButtonGroup(page)
+        methods = QVBoxLayout()
+        for text, value in (
+            ("手动全局阈值", "manual"),
+            ("Otsu 自动阈值", "otsu"),
+            ("均值自适应", "adaptive_mean"),
+            ("高斯自适应", "adaptive_gaussian"),
+        ):
+            button = QRadioButton(text, page)
+            button.setProperty("method", value)
+            self.binarization_group.addButton(button)
+            methods.addWidget(button)
+        self.binarization_group.buttons()[0].setChecked(True)
+        self.binarization_group.buttonClicked.connect(self._emit_binarization)
+        self.binarization_group.buttonClicked.connect(
+            lambda button: self._sync_binarization_visibility()
+        )
+        form.addRow(methods)
+
+        self.threshold = QDoubleSpinBox(page)
+        self.threshold.setRange(0, 255)
+        self.threshold.setValue(128)
+        self.threshold.valueChanged.connect(self._emit_binarization)
+        form.addRow(self.tr("阈值"), self.threshold)
+        self.threshold_label = form.labelForField(self.threshold)
+
+        self.binarization_block_size = QSpinBox(page)
+        self.binarization_block_size.setRange(3, 99)
+        self.binarization_block_size.setSingleStep(2)
+        self.binarization_block_size.setValue(11)
+        self.binarization_block_size.valueChanged.connect(self._emit_binarization)
+        form.addRow(self.tr("邻域大小"), self.binarization_block_size)
+        self.binarization_block_label = form.labelForField(self.binarization_block_size)
+
+        self.binarization_c = QDoubleSpinBox(page)
+        self.binarization_c.setRange(-255, 255)
+        self.binarization_c.setValue(2)
+        self.binarization_c.valueChanged.connect(self._emit_binarization)
+        form.addRow(self.tr("常数 C"), self.binarization_c)
+        self.binarization_c_label = form.labelForField(self.binarization_c)
+        self._sync_binarization_visibility()
+        return page
+
     def retranslateUi(self) -> None:
         self.setTitle(self.tr("处理参数"))
         for label, text in zip(
@@ -312,6 +367,20 @@ class ParamPanel(QGroupBox):
 
     def _emit_geometry(self, *_args) -> None:
         self.geometryChanged.emit(self.geometry_params())
+
+    def _emit_binarization(self, *_args) -> None:
+        self.binarizationChanged.emit(self.binarization_params())
+
+    def _sync_binarization_visibility(self) -> None:
+        method = self.binarization_group.checkedButton().property("method")
+        is_manual = method == "manual"
+        is_adaptive = method in ("adaptive_mean", "adaptive_gaussian")
+        self.threshold.setVisible(is_manual)
+        self.threshold_label.setVisible(is_manual)
+        self.binarization_block_size.setVisible(is_adaptive)
+        self.binarization_block_label.setVisible(is_adaptive)
+        self.binarization_c.setVisible(is_adaptive)
+        self.binarization_c_label.setVisible(is_adaptive)
 
     @staticmethod
     def _parameter_row(
@@ -435,9 +504,16 @@ class ParamPanel(QGroupBox):
             self.frequency_filter_group.buttons()[0].setChecked(True)
             self.frequency_cutoff.setValue(30)
             self._emit_frequency()
-        else:
+        elif operation == "geometry":
             self.geometry_group.buttons()[0].setChecked(True)
             self._emit_geometry()
+        else:
+            self.binarization_group.buttons()[0].setChecked(True)
+            self.threshold.setValue(128)
+            self.binarization_block_size.setValue(11)
+            self.binarization_c.setValue(2)
+            self._sync_binarization_visibility()
+            self._emit_binarization()
 
     def transform_params(self) -> TransformParams:
         return TransformParams(
@@ -473,14 +549,28 @@ class ParamPanel(QGroupBox):
             transform_type=self.geometry_group.checkedButton().property("transform_type")
         )
 
+    def binarization_params(self) -> BinarizationParams:
+        return BinarizationParams(
+            method=self.binarization_group.checkedButton().property("method"),
+            threshold=self.threshold.value(),
+            block_size=self.binarization_block_size.value(),
+            c=self.binarization_c.value(),
+        )
+
     def operation_name(self) -> str:
-        return ("gray", "spatial", "frequency", "geometry")[self.pages.currentIndex()]
+        return (
+            "gray",
+            "spatial",
+            "frequency",
+            "geometry",
+            "binarization",
+        )[self.pages.currentIndex()]
 
     def set_operation(self, operation: str) -> None:
-        if operation not in ("gray", "spatial", "frequency", "geometry"):
+        if operation not in ("gray", "spatial", "frequency", "geometry", "binarization"):
             raise ValueError(f"Unsupported operation: {operation}")
         self.pages.setCurrentIndex(
-            ("gray", "spatial", "frequency", "geometry").index(operation)
+            ("gray", "spatial", "frequency", "geometry", "binarization").index(operation)
         )
         self._set_frequency_controls_enabled(
             operation == "frequency"

@@ -168,6 +168,32 @@ class LibraryImageProcessor:
         raise ValueError(f"Unsupported geometric transform: {transform_type}")
 
     @staticmethod
+    def binarize(
+        image: np.ndarray, method: str, threshold: float, block_size: int, c: float
+    ) -> np.ndarray:
+        values = np.asarray(image, dtype=np.uint8)
+        if method == "manual":
+            _, result = cv2.threshold(values, threshold, 255, cv2.THRESH_BINARY)
+            return result
+        if method == "otsu":
+            _, result = cv2.threshold(values, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            return result
+        if block_size < 3 or block_size % 2 == 0:
+            raise ValueError("Adaptive threshold block size must be a positive odd number")
+        adaptive_method = (
+            cv2.ADAPTIVE_THRESH_MEAN_C
+            if method == "adaptive_mean"
+            else cv2.ADAPTIVE_THRESH_GAUSSIAN_C
+            if method == "adaptive_gaussian"
+            else None
+        )
+        if adaptive_method is None:
+            raise ValueError(f"Unsupported binarization method: {method}")
+        return cv2.adaptiveThreshold(
+            values, 255, adaptive_method, cv2.THRESH_BINARY, block_size, c
+        )
+
+    @staticmethod
     def compute_fft(gray_uint8: np.ndarray) -> np.ndarray:
         """Return the centered OpenCV complex spectrum as float32 HxWx2 data."""
         gray_float32 = np.asarray(gray_uint8, dtype=np.float32)
