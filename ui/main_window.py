@@ -131,6 +131,7 @@ class ProcessingWorker(QObject):
                     filtered,
                     processor.compute_fft_display_spectrum(filtered),
                     processor.compute_fft_phase_spectrum(filtered),
+                    processor.compute_ifft(filtered),
                 )
                 self.finished.emit(result, self.generation)
             elif self.operation == "ifft":
@@ -755,7 +756,7 @@ class MainWindow(QMainWindow):
         elif operation == "transform":
             self._apply_transform_result(result)
             return
-        elif operation in ("fft", "frequency"):
+        elif operation == "fft":
             frequency_data, spectrum, phase = result
             self.state.frequency_data = frequency_data
             self.state.fft_spectrum_uint8 = spectrum
@@ -764,6 +765,14 @@ class MainWindow(QMainWindow):
             self.state.result_fft_spectrum_uint8 = None
             self.state.result_phase_spectrum_uint8 = None
             self.display_mode = "spectrum"
+            self.params.set_frequency_controls_enabled(True)
+        elif operation == "frequency":
+            filtered, spectrum, phase, spatial_result = result
+            self.state.result = spatial_result
+            self.state.result_frequency_data = filtered
+            self.state.result_fft_spectrum_uint8 = spectrum
+            self.state.result_phase_spectrum_uint8 = phase
+            self.display_mode = "original"
             self.params.set_frequency_controls_enabled(True)
         elif operation == "ifft":
             self.state.source = result
