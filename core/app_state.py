@@ -33,6 +33,11 @@ class FrequencyParams:
 
 
 @dataclass
+class GeometryParams:
+    transform_type: str = "rotate_cw_90"
+
+
+@dataclass
 class AppState:
     source: Optional[np.ndarray] = None
     gray_source: Optional[np.ndarray] = None
@@ -41,6 +46,7 @@ class AppState:
     params: TransformParams = field(default_factory=TransformParams)
     spatial_params: SpatialParams = field(default_factory=SpatialParams)
     frequency_params: FrequencyParams = field(default_factory=FrequencyParams)
+    geometry_params: GeometryParams = field(default_factory=GeometryParams)
     operation_log: list[dict] = field(default_factory=list)
     frequency_data: Optional[np.ndarray] = None
     fft_spectrum_uint8: Optional[np.ndarray] = None
@@ -57,6 +63,7 @@ class AppState:
         self.params = TransformParams()
         self.spatial_params = SpatialParams()
         self.frequency_params = FrequencyParams()
+        self.geometry_params = GeometryParams()
         self.operation_log.clear()
         self.clear_frequency_data()
 

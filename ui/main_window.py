@@ -63,6 +63,10 @@ class ProcessingWorker(QObject):
                     )
                     result = processor.spatial_filter(image, kernel)
                 self.finished.emit(result, self.generation)
+            elif self.operation == "geometry":
+                processor, image, params = self.payload
+                result = processor.geometric_transform(image, params.transform_type)
+                self.finished.emit(result, self.generation)
             elif self.operation == "transform":
                 processor, image, params = self.payload
                 if params.mode == "linear":
@@ -99,8 +103,11 @@ class ProcessingWorker(QObject):
                 )
                 self.finished.emit(result, self.generation)
             elif self.operation == "ifft":
-                frequency_data, processor = self.payload
-                self.finished.emit(processor.compute_ifft(frequency_data), self.generation)
+                frequency_data, processor, component = self.payload
+                self.finished.emit(
+                    processor.compute_ifft(frequency_data, component),
+                    self.generation,
+                )
         except Exception as error:
             self.failed.emit(str(error), self.generation)
 
@@ -200,8 +207,13 @@ class MainWindow(QMainWindow):
         self.images.displayModeRequested.connect(self.schedule_display_mode_switch)
         self.params.changed.connect(self.apply_params)
         self.params.spatialChanged.connect(self.apply_spatial_params)
+        self.params.geometryChanged.connect(self.apply_geometry_params)
         self.params.fftRequested.connect(self.compute_fft)
         self.params.ifftRequested.connect(self.apply_ifft)
+        self.params.magnitudeIfftRequested.connect(
+            lambda: self.apply_ifft("magnitude")
+        )
+        self.params.phaseIfftRequested.connect(lambda: self.apply_ifft("phase"))
         self.params.frequencyChanged.connect(self.apply_frequency_filter)
         self.spatial_timer = QTimer(self)
         self.spatial_timer.setSingleShot(True)
@@ -308,6 +320,7 @@ class MainWindow(QMainWindow):
             ("灰度变换", "gray"),
             ("空间滤波", "spatial"),
             ("频域滤波", "frequency"),
+            ("几何变换", "geometry"),
         )
         self.operation_actions: dict[str, QAction] = {}
         for text, operation in operations:
@@ -332,6 +345,8 @@ class MainWindow(QMainWindow):
         self.params.set_operation(operation)
         if operation == "spatial":
             self.apply_spatial_params(self.params.spatial_params())
+        elif operation == "geometry":
+            self.apply_geometry_params(self.params.geometry_params())
 
     def retranslateUi(self) -> None:
         self.setWindowTitle(self.tr("image-process"))
@@ -357,6 +372,7 @@ class MainWindow(QMainWindow):
         self.operation_actions["gray"].setText(self.tr("灰度变换"))
         self.operation_actions["spatial"].setText(self.tr("空间滤波"))
         self.operation_actions["frequency"].setText(self.tr("频域滤波"))
+        self.operation_actions["geometry"].setText(self.tr("几何变换"))
         self.images.retranslateUi()
         self.params.retranslateUi()
         self.attributes.retranslateUi()
@@ -600,6 +616,16 @@ class MainWindow(QMainWindow):
         self._pending_spatial = params
         self.spatial_timer.start()
 
+    def apply_geometry_params(self, params) -> None:
+        if self.state.source is None:
+            return
+        self._processing_generation += 1
+        self.state.geometry_params = params
+        self._start_processing(
+            "geometry",
+            (self.processor, self.state.source.copy(), params),
+        )
+
     def _run_pending_spatial(self) -> None:
         if self.state.source is None or self.state.source.ndim != 2:
             return
@@ -646,6 +672,13 @@ class MainWindow(QMainWindow):
             self.state.result_frequency_data = None
             self.state.result_fft_spectrum_uint8 = None
             self.state.result_phase_spectrum_uint8 = None
+        elif operation == "geometry":
+            self.state.result = result
+            self.state.clear_frequency_data()
+            self.state.result_frequency_data = None
+            self.state.result_fft_spectrum_uint8 = None
+            self.state.result_phase_spectrum_uint8 = None
+            self.display_mode = "original"
         elif operation == "transform":
             self._apply_transform_result(result)
             return
@@ -677,12 +710,12 @@ class MainWindow(QMainWindow):
         if generation == self._processing_generation:
             self.statusBar().showMessage(self.tr("处理失败：") + message)
 
-    def apply_ifft(self) -> None:
+    def apply_ifft(self, component: str = "full") -> None:
         if self.state.frequency_data is None:
             return
         self._start_processing(
             "ifft",
-            (self.state.frequency_data.copy(), LibraryImageProcessor),
+            (self.state.frequency_data.copy(), LibraryImageProcessor, component),
         )
 
     def _set_frequency_controls_enabled(self, enabled: bool) -> None:

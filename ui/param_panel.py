@@ -20,15 +20,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core.app_state import FrequencyParams, SpatialParams, TransformParams
+from core.app_state import FrequencyParams, GeometryParams, SpatialParams, TransformParams
 
 
 class ParamPanel(QGroupBox):
     changed = Signal(object)
     spatialChanged = Signal(object)
     frequencyChanged = Signal(object)
+    geometryChanged = Signal(object)
     fftRequested = Signal()
     ifftRequested = Signal()
+    magnitudeIfftRequested = Signal()
+    phaseIfftRequested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -42,7 +45,13 @@ class ParamPanel(QGroupBox):
         self.transform_page = self._create_transform_page()
         self.spatial_page = self._create_spatial_page()
         self.frequency_page = self._create_frequency_page()
-        for page in (self.transform_page, self.spatial_page, self.frequency_page):
+        self.geometry_page = self._create_geometry_page()
+        for page in (
+            self.transform_page,
+            self.spatial_page,
+            self.frequency_page,
+            self.geometry_page,
+        ):
             self.pages.addWidget(page)
         layout.addWidget(self.pages)
 
@@ -219,14 +228,40 @@ class ParamPanel(QGroupBox):
         layout.addLayout(form)
         self.fft_button = QPushButton(page)
         self.ifft_button = QPushButton(page)
+        self.magnitude_ifft_button = QPushButton(page)
+        self.phase_ifft_button = QPushButton(page)
         layout.addWidget(self.fft_button)
         layout.addWidget(self.ifft_button)
+        layout.addWidget(self.magnitude_ifft_button)
+        layout.addWidget(self.phase_ifft_button)
         layout.addStretch()
         self.frequency_filter_group.buttonClicked.connect(self._emit_frequency)
         self.frequency_cutoff.valueChanged.connect(self._emit_frequency)
         self.fft_button.clicked.connect(self.fftRequested)
         self.ifft_button.clicked.connect(self.ifftRequested)
+        self.magnitude_ifft_button.clicked.connect(self.magnitudeIfftRequested)
+        self.phase_ifft_button.clicked.connect(self.phaseIfftRequested)
         self._set_frequency_controls_enabled(False)
+        return page
+
+    def _create_geometry_page(self) -> QWidget:
+        page = QWidget(self)
+        layout = QVBoxLayout(page)
+        self.geometry_group = QButtonGroup(page)
+        for text, value in (
+            ("顺时针旋转 90°", "rotate_cw_90"),
+            ("逆时针旋转 90°", "rotate_ccw_90"),
+            ("旋转 180°", "rotate_180"),
+            ("水平翻转", "flip_horizontal"),
+            ("垂直翻转", "flip_vertical"),
+        ):
+            button = QRadioButton(text, page)
+            button.setProperty("transform_type", value)
+            self.geometry_group.addButton(button)
+            layout.addWidget(button)
+        self.geometry_group.buttons()[0].setChecked(True)
+        self.geometry_group.buttonClicked.connect(self._emit_geometry)
+        layout.addStretch()
         return page
 
     def retranslateUi(self) -> None:
@@ -239,6 +274,11 @@ class ParamPanel(QGroupBox):
         self.reset.setText(self.tr("重置参数"))
         self.fft_button.setText(self.tr("傅里叶变换"))
         self.ifft_button.setText(self.tr("应用逆变换"))
+        self.magnitude_ifft_button.setText(self.tr("仅幅度谱恢复"))
+        self.phase_ifft_button.setText(self.tr("仅相位谱恢复"))
+
+    def _emit_geometry(self, *_args) -> None:
+        self.geometryChanged.emit(self.geometry_params())
 
     @staticmethod
     def _parameter_row(
@@ -324,6 +364,8 @@ class ParamPanel(QGroupBox):
             button.setEnabled(enabled)
         self.frequency_cutoff.setEnabled(enabled)
         self.ifft_button.setEnabled(enabled)
+        self.magnitude_ifft_button.setEnabled(enabled)
+        self.phase_ifft_button.setEnabled(enabled)
 
     def set_frequency_controls_enabled(self, enabled: bool) -> None:
         self._set_frequency_controls_enabled(enabled)
@@ -347,10 +389,13 @@ class ParamPanel(QGroupBox):
             self.salt_pepper_amount.setValue(5)
             self._sync_spatial_visibility()
             self._emit_spatial()
-        else:
+        elif operation == "frequency":
             self.frequency_filter_group.buttons()[0].setChecked(True)
             self.frequency_cutoff.setValue(30)
             self._emit_frequency()
+        else:
+            self.geometry_group.buttons()[0].setChecked(True)
+            self._emit_geometry()
 
     def transform_params(self) -> TransformParams:
         return TransformParams(
@@ -378,13 +423,20 @@ class ParamPanel(QGroupBox):
             cutoff=self.frequency_cutoff.value(),
         )
 
+    def geometry_params(self) -> GeometryParams:
+        return GeometryParams(
+            transform_type=self.geometry_group.checkedButton().property("transform_type")
+        )
+
     def operation_name(self) -> str:
-        return ("gray", "spatial", "frequency")[self.pages.currentIndex()]
+        return ("gray", "spatial", "frequency", "geometry")[self.pages.currentIndex()]
 
     def set_operation(self, operation: str) -> None:
-        if operation not in ("gray", "spatial", "frequency"):
+        if operation not in ("gray", "spatial", "frequency", "geometry"):
             raise ValueError(f"Unsupported operation: {operation}")
-        self.pages.setCurrentIndex(("gray", "spatial", "frequency").index(operation))
+        self.pages.setCurrentIndex(
+            ("gray", "spatial", "frequency", "geometry").index(operation)
+        )
         self._set_frequency_controls_enabled(
             operation == "frequency"
             and self.frequency_filter_group.buttons()[0].isEnabled()

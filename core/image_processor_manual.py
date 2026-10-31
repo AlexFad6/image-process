@@ -156,3 +156,18 @@ class ManualImageProcessor:
         values[mask & salt] = 255
         values[mask & ~salt] = 0
         return np.ascontiguousarray(values)
+
+    @staticmethod
+    def geometric_transform(image: np.ndarray, transform_type: str) -> np.ndarray:
+        """Rotate or flip an image using NumPy operations."""
+        if transform_type == "rotate_cw_90":
+            return np.rot90(image, k=-1).copy()
+        if transform_type == "rotate_ccw_90":
+            return np.rot90(image, k=1).copy()
+        if transform_type == "rotate_180":
+            return np.rot90(image, k=2).copy()
+        if transform_type == "flip_horizontal":
+            return np.flip(image, axis=1).copy()
+        if transform_type == "flip_vertical":
+            return np.flip(image, axis=0).copy()
+        raise ValueError(f"Unsupported geometric transform: {transform_type}")

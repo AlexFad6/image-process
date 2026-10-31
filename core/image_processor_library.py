@@ -129,6 +129,22 @@ class LibraryImageProcessor:
         return np.ascontiguousarray(values)
 
     @staticmethod
+    def geometric_transform(image: np.ndarray, transform_type: str) -> np.ndarray:
+        """Rotate or flip an image using the requested geometric transform."""
+        transforms = {
+            "rotate_cw_90": cv2.ROTATE_90_CLOCKWISE,
+            "rotate_ccw_90": cv2.ROTATE_90_COUNTERCLOCKWISE,
+            "rotate_180": cv2.ROTATE_180,
+        }
+        if transform_type in transforms:
+            return cv2.rotate(image, transforms[transform_type])
+        if transform_type == "flip_horizontal":
+            return cv2.flip(image, 1)
+        if transform_type == "flip_vertical":
+            return cv2.flip(image, 0)
+        raise ValueError(f"Unsupported geometric transform: {transform_type}")
+
+    @staticmethod
     def compute_fft(gray_uint8: np.ndarray) -> np.ndarray:
         """Return the centered OpenCV complex spectrum as float32 HxWx2 data."""
         gray_float32 = np.asarray(gray_uint8, dtype=np.float32)
@@ -175,8 +191,19 @@ class LibraryImageProcessor:
         return cv2.mulSpectrums(dft_shift, transfer_complex, flags=0)
 
     @staticmethod
-    def compute_ifft(dft_shift: np.ndarray) -> np.ndarray:
-        """Return the normalized uint8 spatial image reconstructed from a spectrum."""
+    def compute_ifft(dft_shift: np.ndarray, component: str = "full") -> np.ndarray:
+        """Return a normalized image reconstructed from a selected spectrum component."""
+        if component not in ("full", "magnitude", "phase"):
+            raise ValueError(f"Unsupported spectrum component: {component}")
+        if component != "full":
+            real = dft_shift[..., 0]
+            imaginary = dft_shift[..., 1]
+            magnitude = cv2.magnitude(real, imaginary)
+            if component == "magnitude":
+                dft_shift = np.stack((magnitude, np.zeros_like(magnitude)), axis=-1)
+            else:
+                phase = np.arctan2(imaginary, real)
+                dft_shift = np.stack((np.cos(phase), np.sin(phase)), axis=-1)
         unshifted = np.fft.ifftshift(dft_shift, axes=(0, 1))
         spatial = cv2.idft(unshifted, flags=cv2.DFT_SCALE | cv2.DFT_REAL_OUTPUT)
         return LibraryImageProcessor.normalize_to_uint8(np.abs(spatial))
