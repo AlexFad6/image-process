@@ -270,7 +270,21 @@ class ParamPanel(QGroupBox):
         self.frequency_cutoff.setValue(30)
         self.frequency_cutoff.setSingleStep(1)
         form.addRow(frequency_filters)
+        self.frequency_pass_group = QButtonGroup(page)
+        pass_filters = QHBoxLayout()
+        for text, value in (("低通", "lowpass"), ("高通", "highpass")):
+            button = QRadioButton(text, page)
+            button.setProperty("pass_type", value)
+            self.frequency_pass_group.addButton(button)
+            pass_filters.addWidget(button)
+        self.frequency_pass_group.buttons()[0].setChecked(True)
+        form.addRow(pass_filters)
         form.addRow(self.tr("截止频率"), self.frequency_cutoff)
+        self.frequency_order = QSpinBox(page)
+        self.frequency_order.setRange(1, 10)
+        self.frequency_order.setValue(2)
+        form.addRow(self.tr("巴特沃斯阶数"), self.frequency_order)
+        self.frequency_order_label = form.labelForField(self.frequency_order)
         layout.addLayout(form)
         self.fft_button = QPushButton(page)
         self.ifft_button = QPushButton(page)
@@ -282,7 +296,13 @@ class ParamPanel(QGroupBox):
         layout.addWidget(self.phase_ifft_button)
         layout.addStretch()
         self.frequency_filter_group.buttonClicked.connect(self._emit_frequency)
+        self.frequency_pass_group.buttonClicked.connect(self._emit_frequency)
         self.frequency_cutoff.valueChanged.connect(self._emit_frequency)
+        self.frequency_order.valueChanged.connect(self._emit_frequency)
+        self.frequency_filter_group.buttonClicked.connect(
+            lambda button: self._sync_frequency_visibility()
+        )
+        self._sync_frequency_visibility()
         self.fft_button.clicked.connect(self.fftRequested)
         self.ifft_button.clicked.connect(self.ifftRequested)
         self.magnitude_ifft_button.clicked.connect(self.magnitudeIfftRequested)
@@ -509,6 +529,14 @@ class ParamPanel(QGroupBox):
     def _emit_frequency(self, *_args) -> None:
         self.frequencyChanged.emit(self.frequency_params())
 
+    def _sync_frequency_visibility(self) -> None:
+        is_butterworth = (
+            self.frequency_filter_group.checkedButton().property("filter_type")
+            == "butterworth"
+        )
+        self.frequency_order.setVisible(is_butterworth)
+        self.frequency_order_label.setVisible(is_butterworth)
+
     def _sync_transform_visibility(self) -> None:
         mode = self.transform_mode()
         self.a_row.setVisible(mode == "linear")
@@ -573,7 +601,10 @@ class ParamPanel(QGroupBox):
             self._emit_spatial()
         elif operation == "frequency":
             self.frequency_filter_group.buttons()[0].setChecked(True)
+            self.frequency_pass_group.buttons()[0].setChecked(True)
             self.frequency_cutoff.setValue(30)
+            self.frequency_order.setValue(2)
+            self._sync_frequency_visibility()
             self._emit_frequency()
         elif operation == "geometry":
             self.geometry_group.buttons()[0].setChecked(True)
@@ -622,6 +653,8 @@ class ParamPanel(QGroupBox):
         return FrequencyParams(
             filter_type=self.frequency_filter_group.checkedButton().property("filter_type"),
             cutoff=self.frequency_cutoff.value(),
+            pass_type=self.frequency_pass_group.checkedButton().property("pass_type"),
+            order=self.frequency_order.value(),
         )
 
     def geometry_params(self) -> GeometryParams:

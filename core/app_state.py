@@ -33,6 +33,8 @@ class SpatialParams:
 class FrequencyParams:
     filter_type: str = "ideal"
     cutoff: float = 30.0
+    pass_type: str = "lowpass"
+    order: int = 2
 
 
 @dataclass

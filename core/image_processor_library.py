@@ -247,12 +247,17 @@ class LibraryImageProcessor:
 
     @staticmethod
     def apply_frequency_filter(
-        dft_shift: np.ndarray, filter_type: str, cutoff: float
+        dft_shift: np.ndarray,
+        filter_type: str,
+        cutoff: float,
+        pass_type: str = "lowpass",
+        order: int = 2,
     ) -> np.ndarray:
-        """Apply an ideal, Gaussian, or Butterworth low-pass transfer function."""
+        """Apply an ideal, Gaussian, or Butterworth frequency filter."""
         if cutoff <= 0:
             raise ValueError("Frequency cutoff must be greater than zero")
-
+        if pass_type not in ("lowpass", "highpass"):
+            raise ValueError(f"Unsupported frequency pass type: {pass_type}")
         height, width = dft_shift.shape[:2]
         y, x = np.ogrid[:height, :width]
         distance = np.sqrt((x - width / 2) ** 2 + (y - height / 2) ** 2)
@@ -261,10 +266,14 @@ class LibraryImageProcessor:
         elif filter_type == "gaussian":
             transfer = np.exp(-(distance ** 2) / (2 * cutoff ** 2)).astype(np.float32)
         elif filter_type == "butterworth":
-            order = 2
+            if order < 1 or int(order) != order:
+                raise ValueError("Butterworth order must be a positive integer")
+            order = int(order)
             transfer = (1.0 / (1.0 + (distance / cutoff) ** (2 * order))).astype(np.float32)
         else:
             raise ValueError(f"Unsupported frequency filter type: {filter_type}")
+        if pass_type == "highpass":
+            transfer = 1.0 - transfer
 
         transfer_complex = np.repeat(transfer[..., np.newaxis], 2, axis=2)
         transfer_complex[..., 1] = 0.0

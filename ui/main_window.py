@@ -121,7 +121,11 @@ class ProcessingWorker(QObject):
             elif self.operation == "frequency":
                 frequency_data, params, processor = self.payload
                 filtered = processor.apply_frequency_filter(
-                    frequency_data, params.filter_type, params.cutoff
+                    frequency_data,
+                    params.filter_type,
+                    params.cutoff,
+                    params.pass_type,
+                    params.order,
                 )
                 result = (
                     filtered,
