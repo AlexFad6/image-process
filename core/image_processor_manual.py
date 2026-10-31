@@ -256,3 +256,61 @@ class ManualImageProcessor:
         else:
             raise ValueError(f"Unsupported binarization method: {method}")
         return np.where(values > local - c, 255, 0).astype(np.uint8)
+
+    @staticmethod
+    def edge_detect(
+        image: np.ndarray,
+        method: str,
+        direction: str,
+        low_threshold: float,
+        high_threshold: float,
+    ) -> np.ndarray:
+        values = np.asarray(image, dtype=np.uint8)
+        if method == "sobel":
+            padded = np.pad(values.astype(np.float32), 1, mode="edge")
+            sobel_x = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=np.float32)
+            sobel_y = sobel_x.T
+            x = sum(
+                sobel_x[row, col] * padded[row:row + values.shape[0], col:col + values.shape[1]]
+                for row in range(3)
+                for col in range(3)
+            )
+            y = sum(
+                sobel_y[row, col] * padded[row:row + values.shape[0], col:col + values.shape[1]]
+                for row in range(3)
+                for col in range(3)
+            )
+            if direction == "x":
+                result = np.abs(x)
+            elif direction == "y":
+                result = np.abs(y)
+            elif direction == "magnitude":
+                result = np.hypot(x, y)
+            else:
+                raise ValueError(f"Unsupported Sobel direction: {direction}")
+            return ManualImageProcessor.normalize_to_uint8(result)
+        if method == "laplacian":
+            kernel = np.array([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=np.float32)
+            padded = np.pad(values.astype(np.float32), 1, mode="edge")
+            result = sum(
+                kernel[row, col] * padded[row:row + values.shape[0], col:col + values.shape[1]]
+                for row in range(3)
+                for col in range(3)
+            )
+            return ManualImageProcessor.normalize_to_uint8(np.abs(result))
+        if method == "canny":
+            if low_threshold < 0 or high_threshold <= low_threshold:
+                raise ValueError("Canny thresholds must satisfy 0 <= low < high")
+            blurred = ManualImageProcessor.spatial_filter(
+                values, ManualImageProcessor.gen_filter_kernel(3, "gaussian")
+            )
+            return ManualImageProcessor.binarize(
+                ManualImageProcessor.edge_detect(
+                    blurred, "sobel", "magnitude", low_threshold, high_threshold
+                ),
+                "manual",
+                high_threshold,
+                11,
+                0,
+            )
+        raise ValueError(f"Unsupported edge detection method: {method}")

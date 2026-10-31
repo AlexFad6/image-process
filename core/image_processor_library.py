@@ -194,6 +194,37 @@ class LibraryImageProcessor:
         )
 
     @staticmethod
+    def edge_detect(
+        image: np.ndarray,
+        method: str,
+        direction: str,
+        low_threshold: float,
+        high_threshold: float,
+    ) -> np.ndarray:
+        values = np.asarray(image, dtype=np.uint8)
+        if method == "sobel":
+            x = cv2.Sobel(values, cv2.CV_32F, 1, 0, ksize=3)
+            y = cv2.Sobel(values, cv2.CV_32F, 0, 1, ksize=3)
+            if direction == "x":
+                result = np.abs(x)
+            elif direction == "y":
+                result = np.abs(y)
+            elif direction == "magnitude":
+                result = cv2.magnitude(x, y)
+            else:
+                raise ValueError(f"Unsupported Sobel direction: {direction}")
+            return LibraryImageProcessor.normalize_to_uint8(result)
+        if method == "laplacian":
+            return LibraryImageProcessor.normalize_to_uint8(
+                np.abs(cv2.Laplacian(values, cv2.CV_32F, ksize=3))
+            )
+        if method == "canny":
+            if low_threshold < 0 or high_threshold <= low_threshold:
+                raise ValueError("Canny thresholds must satisfy 0 <= low < high")
+            return cv2.Canny(values, low_threshold, high_threshold)
+        raise ValueError(f"Unsupported edge detection method: {method}")
+
+    @staticmethod
     def compute_fft(gray_uint8: np.ndarray) -> np.ndarray:
         """Return the centered OpenCV complex spectrum as float32 HxWx2 data."""
         gray_float32 = np.asarray(gray_uint8, dtype=np.float32)

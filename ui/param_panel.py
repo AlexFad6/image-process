@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from core.app_state import (
     BinarizationParams,
+    EdgeParams,
     FrequencyParams,
     GeometryParams,
     SpatialParams,
@@ -35,6 +36,7 @@ class ParamPanel(QGroupBox):
     frequencyChanged = Signal(object)
     geometryChanged = Signal(object)
     binarizationChanged = Signal(object)
+    edgeChanged = Signal(object)
     fftRequested = Signal()
     ifftRequested = Signal()
     magnitudeIfftRequested = Signal()
@@ -54,12 +56,14 @@ class ParamPanel(QGroupBox):
         self.frequency_page = self._create_frequency_page()
         self.geometry_page = self._create_geometry_page()
         self.binarization_page = self._create_binarization_page()
+        self.edge_page = self._create_edge_page()
         for page in (
             self.transform_page,
             self.spatial_page,
             self.frequency_page,
             self.geometry_page,
             self.binarization_page,
+            self.edge_page,
         ):
             self.pages.addWidget(page)
         layout.addWidget(self.pages)
@@ -352,6 +356,57 @@ class ParamPanel(QGroupBox):
         self._sync_binarization_visibility()
         return page
 
+    def _create_edge_page(self) -> QWidget:
+        page = QWidget(self)
+        form = QFormLayout(page)
+        self.edge_method_group = QButtonGroup(page)
+        methods = QVBoxLayout()
+        for text, value in (
+            ("Sobel", "sobel"),
+            ("Laplacian", "laplacian"),
+            ("Canny", "canny"),
+        ):
+            button = QRadioButton(text, page)
+            button.setProperty("method", value)
+            self.edge_method_group.addButton(button)
+            methods.addWidget(button)
+        self.edge_method_group.buttons()[0].setChecked(True)
+        self.edge_method_group.buttonClicked.connect(self._emit_edge)
+        self.edge_method_group.buttonClicked.connect(
+            lambda button: self._sync_edge_visibility()
+        )
+        form.addRow(methods)
+
+        self.edge_direction_group = QButtonGroup(page)
+        direction_row = QWidget(page)
+        directions = QHBoxLayout(direction_row)
+        directions.setContentsMargins(0, 0, 0, 0)
+        for text, value in (("X 方向", "x"), ("Y 方向", "y"), ("合并幅值", "magnitude")):
+            button = QRadioButton(text, page)
+            button.setProperty("direction", value)
+            self.edge_direction_group.addButton(button)
+            directions.addWidget(button)
+        self.edge_direction_group.buttons()[-1].setChecked(True)
+        self.edge_direction_group.buttonClicked.connect(self._emit_edge)
+        form.addRow(direction_row)
+        self.edge_direction_row = direction_row
+
+        self.edge_low_threshold = QDoubleSpinBox(page)
+        self.edge_low_threshold.setRange(0, 255)
+        self.edge_low_threshold.setValue(50)
+        self.edge_low_threshold.valueChanged.connect(self._emit_edge)
+        form.addRow(self.tr("低阈值"), self.edge_low_threshold)
+        self.edge_low_label = form.labelForField(self.edge_low_threshold)
+
+        self.edge_high_threshold = QDoubleSpinBox(page)
+        self.edge_high_threshold.setRange(1, 255)
+        self.edge_high_threshold.setValue(150)
+        self.edge_high_threshold.valueChanged.connect(self._emit_edge)
+        form.addRow(self.tr("高阈值"), self.edge_high_threshold)
+        self.edge_high_label = form.labelForField(self.edge_high_threshold)
+        self._sync_edge_visibility()
+        return page
+
     def retranslateUi(self) -> None:
         self.setTitle(self.tr("处理参数"))
         for label, text in zip(
@@ -371,6 +426,9 @@ class ParamPanel(QGroupBox):
     def _emit_binarization(self, *_args) -> None:
         self.binarizationChanged.emit(self.binarization_params())
 
+    def _emit_edge(self, *_args) -> None:
+        self.edgeChanged.emit(self.edge_params())
+
     def _sync_binarization_visibility(self) -> None:
         method = self.binarization_group.checkedButton().property("method")
         is_manual = method == "manual"
@@ -381,6 +439,19 @@ class ParamPanel(QGroupBox):
         self.binarization_block_label.setVisible(is_adaptive)
         self.binarization_c.setVisible(is_adaptive)
         self.binarization_c_label.setVisible(is_adaptive)
+
+    def _sync_edge_visibility(self) -> None:
+        method = self.edge_method_group.checkedButton().property("method")
+        is_sobel = method == "sobel"
+        is_canny = method == "canny"
+        self.edge_direction_row.setVisible(is_sobel)
+        for widget in (
+            self.edge_low_threshold,
+            self.edge_low_label,
+            self.edge_high_threshold,
+            self.edge_high_label,
+        ):
+            widget.setVisible(is_canny)
 
     @staticmethod
     def _parameter_row(
@@ -508,12 +579,21 @@ class ParamPanel(QGroupBox):
             self.geometry_group.buttons()[0].setChecked(True)
             self._emit_geometry()
         else:
-            self.binarization_group.buttons()[0].setChecked(True)
-            self.threshold.setValue(128)
-            self.binarization_block_size.setValue(11)
-            self.binarization_c.setValue(2)
-            self._sync_binarization_visibility()
-            self._emit_binarization()
+            operation = self.operation_name()
+            if operation == "binarization":
+                self.binarization_group.buttons()[0].setChecked(True)
+                self.threshold.setValue(128)
+                self.binarization_block_size.setValue(11)
+                self.binarization_c.setValue(2)
+                self._sync_binarization_visibility()
+                self._emit_binarization()
+            else:
+                self.edge_method_group.buttons()[0].setChecked(True)
+                self.edge_direction_group.buttons()[-1].setChecked(True)
+                self.edge_low_threshold.setValue(50)
+                self.edge_high_threshold.setValue(150)
+                self._sync_edge_visibility()
+                self._emit_edge()
 
     def transform_params(self) -> TransformParams:
         return TransformParams(
@@ -557,6 +637,14 @@ class ParamPanel(QGroupBox):
             c=self.binarization_c.value(),
         )
 
+    def edge_params(self) -> EdgeParams:
+        return EdgeParams(
+            method=self.edge_method_group.checkedButton().property("method"),
+            direction=self.edge_direction_group.checkedButton().property("direction"),
+            low_threshold=self.edge_low_threshold.value(),
+            high_threshold=self.edge_high_threshold.value(),
+        )
+
     def operation_name(self) -> str:
         return (
             "gray",
@@ -564,13 +652,28 @@ class ParamPanel(QGroupBox):
             "frequency",
             "geometry",
             "binarization",
+            "edge",
         )[self.pages.currentIndex()]
 
     def set_operation(self, operation: str) -> None:
-        if operation not in ("gray", "spatial", "frequency", "geometry", "binarization"):
+        if operation not in (
+            "gray",
+            "spatial",
+            "frequency",
+            "geometry",
+            "binarization",
+            "edge",
+        ):
             raise ValueError(f"Unsupported operation: {operation}")
         self.pages.setCurrentIndex(
-            ("gray", "spatial", "frequency", "geometry", "binarization").index(operation)
+            (
+                "gray",
+                "spatial",
+                "frequency",
+                "geometry",
+                "binarization",
+                "edge",
+            ).index(operation)
         )
         self._set_frequency_controls_enabled(
             operation == "frequency"

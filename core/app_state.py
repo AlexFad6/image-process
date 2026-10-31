@@ -49,6 +49,14 @@ class BinarizationParams:
 
 
 @dataclass
+class EdgeParams:
+    method: str = "sobel"
+    direction: str = "magnitude"
+    low_threshold: float = 50.0
+    high_threshold: float = 150.0
+
+
+@dataclass
 class AppState:
     source: Optional[np.ndarray] = None
     gray_source: Optional[np.ndarray] = None
@@ -59,6 +67,7 @@ class AppState:
     frequency_params: FrequencyParams = field(default_factory=FrequencyParams)
     geometry_params: GeometryParams = field(default_factory=GeometryParams)
     binarization_params: BinarizationParams = field(default_factory=BinarizationParams)
+    edge_params: EdgeParams = field(default_factory=EdgeParams)
     operation_log: list[dict] = field(default_factory=list)
     frequency_data: Optional[np.ndarray] = None
     fft_spectrum_uint8: Optional[np.ndarray] = None
@@ -77,6 +86,7 @@ class AppState:
         self.frequency_params = FrequencyParams()
         self.geometry_params = GeometryParams()
         self.binarization_params = BinarizationParams()
+        self.edge_params = EdgeParams()
         self.operation_log.clear()
         self.clear_frequency_data()
 

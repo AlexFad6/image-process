@@ -84,6 +84,16 @@ class ProcessingWorker(QObject):
                     image, params.method, params.threshold, params.block_size, params.c
                 )
                 self.finished.emit(result, self.generation)
+            elif self.operation == "edge":
+                processor, image, params = self.payload
+                result = processor.edge_detect(
+                    image,
+                    params.method,
+                    params.direction,
+                    params.low_threshold,
+                    params.high_threshold,
+                )
+                self.finished.emit(result, self.generation)
             elif self.operation == "transform":
                 processor, image, params = self.payload
                 if params.mode == "linear":
@@ -226,6 +236,7 @@ class MainWindow(QMainWindow):
         self.params.spatialChanged.connect(self.apply_spatial_params)
         self.params.geometryChanged.connect(self.apply_geometry_params)
         self.params.binarizationChanged.connect(self.apply_binarization_params)
+        self.params.edgeChanged.connect(self.apply_edge_params)
         self.params.fftRequested.connect(self.compute_fft)
         self.params.ifftRequested.connect(self.apply_ifft)
         self.params.magnitudeIfftRequested.connect(
@@ -340,6 +351,7 @@ class MainWindow(QMainWindow):
             ("频域滤波", "frequency"),
             ("几何变换", "geometry"),
             ("二值化", "binarization"),
+            ("边缘检测", "edge"),
         )
         self.operation_actions: dict[str, QAction] = {}
         for text, operation in operations:
@@ -368,6 +380,8 @@ class MainWindow(QMainWindow):
             self.apply_geometry_params(self.params.geometry_params())
         elif operation == "binarization":
             self.apply_binarization_params(self.params.binarization_params())
+        elif operation == "edge":
+            self.apply_edge_params(self.params.edge_params())
 
     def retranslateUi(self) -> None:
         self.setWindowTitle(self.tr("image-process"))
@@ -395,6 +409,7 @@ class MainWindow(QMainWindow):
         self.operation_actions["frequency"].setText(self.tr("频域滤波"))
         self.operation_actions["geometry"].setText(self.tr("几何变换"))
         self.operation_actions["binarization"].setText(self.tr("二值化"))
+        self.operation_actions["edge"].setText(self.tr("边缘检测"))
         self.images.retranslateUi()
         self.params.retranslateUi()
         self.attributes.retranslateUi()
@@ -658,6 +673,16 @@ class MainWindow(QMainWindow):
             (self.processor, self.state.source.copy(), params),
         )
 
+    def apply_edge_params(self, params) -> None:
+        if self.state.source is None or self.state.source.ndim != 2:
+            return
+        self._processing_generation += 1
+        self.state.edge_params = params
+        self._start_processing(
+            "edge",
+            (self.processor, self.state.source.copy(), params),
+        )
+
     def _run_pending_spatial(self) -> None:
         if self.state.source is None or self.state.source.ndim != 2:
             return
@@ -712,6 +737,12 @@ class MainWindow(QMainWindow):
             self.state.result_phase_spectrum_uint8 = None
             self.display_mode = "original"
         elif operation == "binarization":
+            self.state.result = result
+            self.state.result_frequency_data = None
+            self.state.result_fft_spectrum_uint8 = None
+            self.state.result_phase_spectrum_uint8 = None
+            self.display_mode = "original"
+        elif operation == "edge":
             self.state.result = result
             self.state.result_frequency_data = None
             self.state.result_fft_spectrum_uint8 = None
