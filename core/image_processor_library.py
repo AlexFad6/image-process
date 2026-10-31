@@ -112,6 +112,29 @@ class LibraryImageProcessor:
         return np.ascontiguousarray(result)
 
     @staticmethod
+    def bilateral_filter(
+        image: np.ndarray, size: int, sigma_color: float, sigma_space: float
+    ) -> np.ndarray:
+        if size % 2 == 0 or size < 1:
+            raise ValueError("Filter size must be a positive odd number")
+        if sigma_color <= 0 or sigma_space <= 0:
+            raise ValueError("Bilateral filter sigmas must be greater than zero")
+        return cv2.bilateralFilter(image, size, sigma_color, sigma_space)
+
+    @staticmethod
+    def unsharp_mask(image: np.ndarray, size: int, amount: float) -> np.ndarray:
+        if size % 2 == 0 or size < 1:
+            raise ValueError("Filter size must be a positive odd number")
+        if amount < 0:
+            raise ValueError("USM amount must not be negative")
+        blurred = cv2.GaussianBlur(image, (size, size), 0)
+        return np.clip(
+            image.astype(np.float32) + amount * (image.astype(np.float32) - blurred),
+            0,
+            255,
+        ).astype(np.uint8)
+
+    @staticmethod
     def gaussian_noise(image: np.ndarray, mean: float, std: float) -> np.ndarray:
         values = np.asarray(image, dtype=np.float32)
         noise = np.random.default_rng(0).normal(mean, std, values.shape)

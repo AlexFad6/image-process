@@ -54,6 +54,17 @@ class ProcessingWorker(QObject):
                     result = processor.median_filter(
                         image, params.kernel_size, params.median_ratio
                     )
+                elif params.filter_type == "bilateral":
+                    result = processor.bilateral_filter(
+                        image,
+                        params.kernel_size,
+                        params.bilateral_sigma_color,
+                        params.bilateral_sigma_space,
+                    )
+                elif params.filter_type == "usm":
+                    result = processor.unsharp_mask(
+                        image, params.kernel_size, params.usm_amount
+                    )
                 else:
                     kernel_size = params.kernel_size
                     if kernel_size % 2 == 0:

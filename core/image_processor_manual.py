@@ -141,6 +141,52 @@ class ManualImageProcessor:
         return np.ascontiguousarray(result)
 
     @staticmethod
+    def bilateral_filter(
+        image: np.ndarray, size: int, sigma_color: float, sigma_space: float
+    ) -> np.ndarray:
+        if size % 2 == 0 or size < 1:
+            raise ValueError("Filter size must be a positive odd number")
+        if sigma_color <= 0 or sigma_space <= 0:
+            raise ValueError("Bilateral filter sigmas must be greater than zero")
+        values = np.asarray(image, dtype=np.float32)
+        radius = size // 2
+        padded = np.pad(values, radius, mode="edge")
+        axis = np.arange(-radius, radius + 1, dtype=np.float32)
+        spatial = np.exp(-(axis[:, None] ** 2 + axis[None, :] ** 2) / (2 * sigma_space ** 2))
+        result = np.zeros_like(values)
+        weights = np.zeros_like(values)
+        for y in range(size):
+            for x in range(size):
+                neighbor = padded[y:y + values.shape[0], x:x + values.shape[1]]
+                range_weight = np.exp(-((neighbor - values) ** 2) / (2 * sigma_color ** 2))
+                weight = spatial[y, x] * range_weight
+                result += weight * neighbor
+                weights += weight
+        return np.clip(result / weights, 0, 255).astype(np.uint8)
+
+    @staticmethod
+    def unsharp_mask(image: np.ndarray, size: int, amount: float) -> np.ndarray:
+        if size % 2 == 0 or size < 1:
+            raise ValueError("Filter size must be a positive odd number")
+        if amount < 0:
+            raise ValueError("USM amount must not be negative")
+        values = np.asarray(image, dtype=np.float32)
+        kernel = ManualImageProcessor.gen_filter_kernel(size, "gaussian")
+        radius = size // 2
+        padded = np.pad(values, radius, mode="edge")
+        blurred = np.zeros_like(values)
+        for y in range(size):
+            for x in range(size):
+                blurred += kernel[y, x] * padded[
+                    y:y + values.shape[0], x:x + values.shape[1]
+                ]
+        return np.clip(
+            values + amount * (values - blurred),
+            0,
+            255,
+        ).astype(np.uint8)
+
+    @staticmethod
     def gaussian_noise(image: np.ndarray, mean: float, std: float) -> np.ndarray:
         values = np.asarray(image, dtype=np.float32)
         noise = np.random.default_rng(0).normal(mean, std, values.shape)

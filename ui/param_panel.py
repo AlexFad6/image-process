@@ -129,6 +129,7 @@ class ParamPanel(QGroupBox):
         for text, value in (
             ("均值滤波", "mean"),
             ("高斯滤波", "gaussian"),
+            ("双边滤波", "bilateral"),
             ("拉普拉斯", "laplacian"),
             ("Prewitt X", "differenceG_x"),
             ("Prewitt Y", "differenceG_y"),
@@ -136,6 +137,7 @@ class ParamPanel(QGroupBox):
             ("Sobel X", "sobel_x"),
             ("Sobel Y", "sobel_y"),
             ("中值滤波", "median"),
+            ("USM 锐化", "usm"),
             ("高斯白噪声", "gaussian_noise"),
             ("椒盐噪声", "salt_pepper_noise"),
         ):
@@ -160,6 +162,19 @@ class ParamPanel(QGroupBox):
         self.median_ratio.setValue(50)
         self.median_ratio.setSuffix("%")
         self.median_ratio.valueChanged.connect(self._emit_spatial)
+        self.bilateral_sigma_color = QDoubleSpinBox(page)
+        self.bilateral_sigma_color.setRange(0.1, 255)
+        self.bilateral_sigma_color.setValue(75)
+        self.bilateral_sigma_color.valueChanged.connect(self._emit_spatial)
+        self.bilateral_sigma_space = QDoubleSpinBox(page)
+        self.bilateral_sigma_space.setRange(0.1, 255)
+        self.bilateral_sigma_space.setValue(75)
+        self.bilateral_sigma_space.valueChanged.connect(self._emit_spatial)
+        self.usm_amount = QDoubleSpinBox(page)
+        self.usm_amount.setRange(0, 10)
+        self.usm_amount.setValue(1.5)
+        self.usm_amount.setSingleStep(0.1)
+        self.usm_amount.valueChanged.connect(self._emit_spatial)
         self.gaussian_mean = QDoubleSpinBox(page)
         self.gaussian_mean.setRange(-255, 255)
         self.gaussian_mean.setValue(0)
@@ -182,6 +197,24 @@ class ParamPanel(QGroupBox):
         median_ratio_layout.addWidget(self.median_ratio)
         form.addRow(self.tr("中值比例"), self.median_ratio_row)
         self.median_ratio_label = form.labelForField(self.median_ratio_row)
+        self.bilateral_sigma_color_row = QWidget(page)
+        bilateral_color_layout = QHBoxLayout(self.bilateral_sigma_color_row)
+        bilateral_color_layout.setContentsMargins(0, 0, 0, 0)
+        bilateral_color_layout.addWidget(self.bilateral_sigma_color)
+        form.addRow(self.tr("颜色 sigma"), self.bilateral_sigma_color_row)
+        self.bilateral_sigma_color_label = form.labelForField(self.bilateral_sigma_color_row)
+        self.bilateral_sigma_space_row = QWidget(page)
+        bilateral_space_layout = QHBoxLayout(self.bilateral_sigma_space_row)
+        bilateral_space_layout.setContentsMargins(0, 0, 0, 0)
+        bilateral_space_layout.addWidget(self.bilateral_sigma_space)
+        form.addRow(self.tr("空间 sigma"), self.bilateral_sigma_space_row)
+        self.bilateral_sigma_space_label = form.labelForField(self.bilateral_sigma_space_row)
+        self.usm_amount_row = QWidget(page)
+        usm_amount_layout = QHBoxLayout(self.usm_amount_row)
+        usm_amount_layout.setContentsMargins(0, 0, 0, 0)
+        usm_amount_layout.addWidget(self.usm_amount)
+        form.addRow(self.tr("锐化强度"), self.usm_amount_row)
+        self.usm_amount_label = form.labelForField(self.usm_amount_row)
         self.gaussian_mean_row = QWidget(page)
         gaussian_mean_layout = QHBoxLayout(self.gaussian_mean_row)
         gaussian_mean_layout.setContentsMargins(0, 0, 0, 0)
@@ -347,11 +380,17 @@ class ParamPanel(QGroupBox):
     def _sync_spatial_visibility(self) -> None:
         selected = self.spatial_filter_group.checkedButton()
         filter_type = selected.property("filter_type") if selected is not None else None
-        show_kernel_size = filter_type in ("mean", "gaussian", "median")
+        show_kernel_size = filter_type in ("mean", "gaussian", "bilateral", "median", "usm")
         self.kernel_size.setVisible(show_kernel_size)
         self.kernel_size_label.setVisible(show_kernel_size)
         self.median_ratio_row.setVisible(filter_type == "median")
         self.median_ratio_label.setVisible(filter_type == "median")
+        self.bilateral_sigma_color_row.setVisible(filter_type == "bilateral")
+        self.bilateral_sigma_color_label.setVisible(filter_type == "bilateral")
+        self.bilateral_sigma_space_row.setVisible(filter_type == "bilateral")
+        self.bilateral_sigma_space_label.setVisible(filter_type == "bilateral")
+        self.usm_amount_row.setVisible(filter_type == "usm")
+        self.usm_amount_label.setVisible(filter_type == "usm")
         self.gaussian_mean_label.setVisible(filter_type == "gaussian_noise")
         self.gaussian_std_label.setVisible(filter_type == "gaussian_noise")
         self.salt_pepper_amount_label.setVisible(filter_type == "salt_pepper_noise")
@@ -384,6 +423,9 @@ class ParamPanel(QGroupBox):
             self.spatial_filter_group.buttons()[0].setChecked(True)
             self.kernel_size.setValue(3)
             self.median_ratio.setValue(50)
+            self.bilateral_sigma_color.setValue(75)
+            self.bilateral_sigma_space.setValue(75)
+            self.usm_amount.setValue(1.5)
             self.gaussian_mean.setValue(0)
             self.gaussian_std.setValue(20)
             self.salt_pepper_amount.setValue(5)
@@ -412,6 +454,9 @@ class ParamPanel(QGroupBox):
             filter_type=self.spatial_filter_group.checkedButton().property("filter_type"),
             kernel_size=self.kernel_size.value(),
             median_ratio=self.median_ratio.value(),
+            bilateral_sigma_color=self.bilateral_sigma_color.value(),
+            bilateral_sigma_space=self.bilateral_sigma_space.value(),
+            usm_amount=self.usm_amount.value(),
             gaussian_mean=self.gaussian_mean.value(),
             gaussian_std=self.gaussian_std.value(),
             salt_pepper_amount=self.salt_pepper_amount.value(),
