@@ -28,6 +28,36 @@ from .param_panel import ParamPanel
 from utils import install_language, resource_path
 
 
+def _apply_extended_frequency_filter(dft_shift, params):
+    """Dispatch all frequency-domain modes through the core filter API."""
+    mode = getattr(params, "mode", params.pass_type)
+    if mode in ("lowpass", "highpass"):
+        return LibraryImageProcessor.apply_frequency_filter(
+            dft_shift, params.filter_type, params.cutoff, mode, params.order
+        )
+    if mode in ("bandpass", "bandstop", "bandreject"):
+        pass_type = "bandreject" if mode in ("bandstop", "bandreject") else "bandpass"
+        return LibraryImageProcessor.apply_band_filter(
+            dft_shift,
+            pass_type,
+            params.filter_type,
+            params.cutoff,
+            params.band_width,
+            params.order,
+        )
+    if mode in ("notch", "notchreject", "notchpass"):
+        pass_type = "notchreject" if mode in ("notch", "notchreject") else "notchpass"
+        return LibraryImageProcessor.apply_notch_filter(
+            dft_shift,
+            pass_type,
+            params.filter_type,
+            params.notch_points,
+            params.notch_radius,
+            params.order,
+        )
+    raise ValueError(f"Unsupported frequency mode: {mode}")
+
+
 class ProcessingWorker(QObject):
     finished = Signal(object, int)
     failed = Signal(str, int)
@@ -120,13 +150,7 @@ class ProcessingWorker(QObject):
                 self.finished.emit(result, self.generation)
             elif self.operation == "frequency":
                 frequency_data, params, processor = self.payload
-                filtered = processor.apply_frequency_filter(
-                    frequency_data,
-                    params.filter_type,
-                    params.cutoff,
-                    params.pass_type,
-                    params.order,
-                )
+                filtered = _apply_extended_frequency_filter(frequency_data, params)
                 result = (
                     filtered,
                     processor.compute_fft_display_spectrum(filtered),
@@ -160,6 +184,7 @@ class MainWindow(QMainWindow):
         self._processing_jobs: dict[int, tuple[QThread, ProcessingWorker]] = {}
 
         self.images = ImagePanel()
+        self.images.original.imageClicked.connect(self._handle_frequency_click)
         self.display_mode_timer = QTimer(self)
         self.display_mode_timer.setSingleShot(True)
         self.display_mode_timer.setInterval(200)
@@ -387,6 +412,18 @@ class MainWindow(QMainWindow):
             self.apply_binarization_params(self.params.binarization_params())
         elif operation == "edge":
             self.apply_edge_params(self.params.edge_params())
+
+    def _handle_frequency_click(self, scene_x: float, scene_y: float) -> None:
+        if self.params.operation_name() != "frequency" or self.state.frequency_data is None:
+            return
+        mode = self.params.frequency_mode_group.checkedButton().property("frequency_mode")
+        if mode not in ("notchreject", "notchpass", "notch"):
+            return
+        height, width = self.state.frequency_data.shape[:2]
+        x = round(scene_x - width / 2.0, 3)
+        y = round(scene_y - height / 2.0, 3)
+        if abs(x) <= width / 2.0 and abs(y) <= height / 2.0:
+            self.params.add_notch_point((x, y))
 
     def retranslateUi(self) -> None:
         self.setWindowTitle(self.tr("image-process"))

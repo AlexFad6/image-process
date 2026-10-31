@@ -35,6 +35,10 @@ class FrequencyParams:
     cutoff: float = 30.0
     pass_type: str = "lowpass"
     order: int = 2
+    mode: str = "lowpass"
+    band_width: float = 20.0
+    notch_radius: float = 8.0
+    notch_points: list[tuple[float, float]] = field(default_factory=list)
 
 
 @dataclass

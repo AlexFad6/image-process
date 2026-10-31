@@ -152,6 +152,8 @@ class MiniMap(QWidget):
 
 
 class ImageView(SyncGraphicsView):
+    imageClicked = Signal(float, float)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._pixmap_item = None
@@ -276,6 +278,14 @@ class ImageView(SyncGraphicsView):
         self.minimap.set_pixmap(None)
         self.minimap.hide()
         self.viewportChanged.emit()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton and self._pixmap_item is not None:
+            point = self.mapToScene(event.position().toPoint())
+            rect = self._scene.sceneRect()
+            if rect.contains(point):
+                self.imageClicked.emit(point.x(), point.y())
+        super().mousePressEvent(event)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

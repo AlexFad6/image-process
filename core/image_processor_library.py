@@ -3,6 +3,70 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+MAX_FREQUENCY_ORDER = 32
+MAX_NOTCHES = 128
+
+
+def _validate_dft(dft_shift: np.ndarray) -> np.ndarray:
+    """Validate an OpenCV complex DFT (or a native complex spectrum)."""
+    values = np.asarray(dft_shift)
+    if values.ndim < 2 or values.shape[0] < 1 or values.shape[1] < 1:
+        raise ValueError("DFT must contain at least one row and column")
+    if not np.iscomplexobj(values) and (values.ndim < 3 or values.shape[-1] != 2):
+        raise ValueError("DFT must be complex or have a final real/imaginary axis")
+    if not np.issubdtype(values.dtype, np.number):
+        raise ValueError("DFT must contain numeric values")
+    return values
+
+
+def _apply_transfer(dft_shift: np.ndarray, transfer: np.ndarray) -> np.ndarray:
+    values = _validate_dft(dft_shift)
+    shape = transfer.shape + (1,) * (values.ndim - 2)
+    if np.iscomplexobj(values):
+        return values * transfer.reshape(shape)
+    # HxWx2 and HxWxCx2 (the latter is useful for colour spectra).
+    return values * transfer.reshape(shape)
+
+
+def _validate_order(order: int) -> int:
+    if isinstance(order, bool) or int(order) != order or not 1 <= int(order) <= MAX_FREQUENCY_ORDER:
+        raise ValueError(
+            f"Butterworth order must be an integer between 1 and {MAX_FREQUENCY_ORDER}"
+        )
+    return int(order)
+
+
+def _band_transfer(
+    distance: np.ndarray, filter_type: str, d0: float, bandwidth: float, order: int
+) -> np.ndarray:
+    if filter_type == "ideal":
+        half = bandwidth / 2.0
+        return ((distance >= d0 - half) & (distance <= d0 + half)).astype(np.float32)
+    if filter_type == "gaussian":
+        # This form has a well-defined limit at the origin and peaks at d0.
+        denominator = distance * bandwidth
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            ratio = np.divide(
+                distance * distance - d0 * d0,
+                denominator,
+                out=np.full_like(distance, np.inf, dtype=np.float64),
+                where=denominator != 0,
+            )
+        return np.exp(-0.5 * ratio * ratio).astype(np.float32)
+    if filter_type == "butterworth":
+        order = _validate_order(order)
+        denominator = distance * bandwidth
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            ratio = np.divide(
+                distance * distance - d0 * d0,
+                denominator,
+                out=np.full_like(distance, np.inf, dtype=np.float64),
+                where=denominator != 0,
+            )
+        return (1.0 / (1.0 + np.abs(ratio) ** (2 * order))).astype(np.float32)
+    raise ValueError(f"Unsupported frequency filter type: {filter_type}")
+
+
 class LibraryImageProcessor:
     """使用OpenCV实现的图像处理算法。"""
     """Image processing algorithms implemented with OpenCV."""
@@ -266,9 +330,7 @@ class LibraryImageProcessor:
         elif filter_type == "gaussian":
             transfer = np.exp(-(distance ** 2) / (2 * cutoff ** 2)).astype(np.float32)
         elif filter_type == "butterworth":
-            if order < 1 or int(order) != order:
-                raise ValueError("Butterworth order must be a positive integer")
-            order = int(order)
+            order = _validate_order(order)
             transfer = (1.0 / (1.0 + (distance / cutoff) ** (2 * order))).astype(np.float32)
         else:
             raise ValueError(f"Unsupported frequency filter type: {filter_type}")
@@ -278,6 +340,112 @@ class LibraryImageProcessor:
         transfer_complex = np.repeat(transfer[..., np.newaxis], 2, axis=2)
         transfer_complex[..., 1] = 0.0
         return cv2.mulSpectrums(dft_shift, transfer_complex, flags=0)
+
+    @staticmethod
+    def apply_band_filter(
+        dft_shift: np.ndarray,
+        pass_type: str,
+        filter_type: str,
+        d0: float,
+        bandwidth: float,
+        order: int = 2,
+    ) -> np.ndarray:
+        """Apply an ideal, Gaussian, or Butterworth band-pass/reject filter."""
+        values = _validate_dft(dft_shift)
+        if pass_type == "bandstop":
+            pass_type = "bandreject"
+        if pass_type not in ("bandpass", "bandreject"):
+            raise ValueError("pass_type must be 'bandpass' or 'bandreject'")
+        if filter_type not in ("ideal", "butterworth", "gaussian"):
+            raise ValueError(f"Unsupported frequency filter type: {filter_type}")
+        if not np.isfinite(d0) or d0 <= 0:
+            raise ValueError("d0 must be finite and greater than zero")
+        if not np.isfinite(bandwidth) or bandwidth <= 0:
+            raise ValueError("bandwidth must be finite and greater than zero")
+        if filter_type == "butterworth":
+            _validate_order(order)
+        height, width = values.shape[:2]
+        y, x = np.ogrid[:height, :width]
+        distance = np.hypot(x - width / 2.0, y - height / 2.0)
+        transfer = _band_transfer(distance, filter_type, float(d0), float(bandwidth), order)
+        if pass_type == "bandreject":
+            transfer = 1.0 - transfer
+        return _apply_transfer(values, transfer)
+
+    @staticmethod
+    def apply_notch_filter(
+        dft_shift: np.ndarray,
+        pass_type: str,
+        filter_type: str,
+        notches,
+        radius: float,
+        order: int = 2,
+    ) -> np.ndarray:
+        """Apply a symmetric notch-pass or notch-reject filter.
+
+        Notch coordinates are offsets from the spectrum centre, in (x, y)
+        order.  The opposite coordinate is added automatically.
+        """
+        values = _validate_dft(dft_shift)
+        pass_aliases = {
+            "notchpass": "notchpass", "notch_pass": "notchpass",
+            "pass": "notchpass", "notchstop": "notchstop",
+            "notch_stop": "notchstop", "stop": "notchstop",
+            "notchreject": "notchstop", "notch_reject": "notchstop",
+        }
+        normalized_pass = pass_aliases.get(pass_type)
+        if normalized_pass is None:
+            raise ValueError("pass_type must be 'notchpass' or 'notchstop'")
+        if filter_type not in ("ideal", "butterworth", "gaussian"):
+            raise ValueError(f"Unsupported frequency filter type: {filter_type}")
+        if not np.isfinite(radius) or radius <= 0:
+            raise ValueError("radius must be finite and greater than zero")
+        if filter_type == "butterworth":
+            _validate_order(order)
+        try:
+            coordinates = list(notches)
+        except TypeError as exc:
+            raise ValueError("notches must be an iterable of (x, y) coordinates") from exc
+        if not coordinates:
+            return values.copy()
+        if len(coordinates) > MAX_NOTCHES:
+            raise ValueError(f"notches must contain at most {MAX_NOTCHES} coordinates")
+        height, width = values.shape[:2]
+        max_x, max_y = width / 2.0, height / 2.0
+        points = set()
+        for point in coordinates:
+            if not isinstance(point, (tuple, list, np.ndarray)) or len(point) != 2:
+                raise ValueError("Each notch must be an (x, y) coordinate")
+            try:
+                px, py = float(point[0]), float(point[1])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Notch coordinates must be numeric") from exc
+            if not np.isfinite(px) or not np.isfinite(py):
+                raise ValueError("Notch coordinates must be finite")
+            if abs(px) > max_x or abs(py) > max_y:
+                raise ValueError("Notch coordinate is outside the spectrum")
+            points.add((px, py))
+            points.add((-px, -py))
+        if len(points) > MAX_NOTCHES:
+            raise ValueError(f"At most {MAX_NOTCHES} symmetric notch coordinates are allowed")
+
+        y, x = np.ogrid[:height, :width]
+        transfer = np.ones((height, width), dtype=np.float32)
+        for px, py in points:
+            distance = np.hypot(x - (width / 2.0 + px), y - (height / 2.0 + py))
+            if filter_type == "ideal":
+                factor = (distance > radius).astype(np.float32)
+            elif filter_type == "gaussian":
+                factor = (1.0 - np.exp(-(distance ** 2) / (2.0 * radius ** 2))).astype(np.float32)
+            else:
+                order_value = _validate_order(order)
+                with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+                    factor = 1.0 / (1.0 + np.power(radius / distance, 2 * order_value))
+                factor = np.nan_to_num(factor, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+            transfer *= factor
+        if normalized_pass == "notchpass":
+            transfer = 1.0 - transfer
+        return _apply_transfer(values, transfer)
 
     @staticmethod
     def compute_ifft(dft_shift: np.ndarray, component: str = "full") -> np.ndarray:

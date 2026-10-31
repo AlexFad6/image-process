@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QRadioButton,
     QSlider,
@@ -265,6 +267,22 @@ class ParamPanel(QGroupBox):
             self.frequency_filter_group.addButton(button)
             frequency_filters.addWidget(button)
         self.frequency_filter_group.buttons()[0].setChecked(True)
+        self.frequency_mode_group = QButtonGroup(page)
+        frequency_modes = QHBoxLayout()
+        for text, value in (
+            ("低通", "lowpass"),
+            ("高通", "highpass"),
+            ("带通", "bandpass"),
+            ("带阻", "bandreject"),
+            ("陷波阻", "notchreject"),
+            ("陷波通", "notchpass"),
+        ):
+            button = QRadioButton(text, page)
+            button.setProperty("frequency_mode", value)
+            self.frequency_mode_group.addButton(button)
+            frequency_modes.addWidget(button)
+        self.frequency_mode_group.buttons()[0].setChecked(True)
+        form.addRow(frequency_modes)
         self.frequency_cutoff = QDoubleSpinBox(page)
         self.frequency_cutoff.setRange(1, 10000)
         self.frequency_cutoff.setValue(30)
@@ -280,11 +298,41 @@ class ParamPanel(QGroupBox):
         self.frequency_pass_group.buttons()[0].setChecked(True)
         form.addRow(pass_filters)
         form.addRow(self.tr("截止频率"), self.frequency_cutoff)
+        self.frequency_band_width = QDoubleSpinBox(page)
+        self.frequency_band_width.setRange(1, 10000)
+        self.frequency_band_width.setValue(20)
+        form.addRow(self.tr("带宽"), self.frequency_band_width)
         self.frequency_order = QSpinBox(page)
         self.frequency_order.setRange(1, 10)
         self.frequency_order.setValue(2)
         form.addRow(self.tr("巴特沃斯阶数"), self.frequency_order)
         self.frequency_order_label = form.labelForField(self.frequency_order)
+        self.frequency_band_width_label = form.labelForField(self.frequency_band_width)
+        self.frequency_notch_radius = QDoubleSpinBox(page)
+        self.frequency_notch_radius.setRange(1, 1000)
+        self.frequency_notch_radius.setValue(8)
+        form.addRow(self.tr("陷波半径"), self.frequency_notch_radius)
+        self.frequency_notch_radius_label = form.labelForField(self.frequency_notch_radius)
+        notch_row = QWidget(page)
+        notch_layout = QHBoxLayout(notch_row)
+        notch_layout.setContentsMargins(0, 0, 0, 0)
+        self.frequency_notch_x = QSpinBox(page)
+        self.frequency_notch_x.setRange(-10000, 10000)
+        self.frequency_notch_y = QSpinBox(page)
+        self.frequency_notch_y.setRange(-10000, 10000)
+        self.frequency_add_notch = QPushButton("添加", page)
+        self.frequency_remove_notch = QPushButton("删除选中", page)
+        self.frequency_clear_notches = QPushButton("清空", page)
+        self.frequency_notch_list = QListWidget(page)
+        notch_layout.addWidget(QLabel("x", page))
+        notch_layout.addWidget(self.frequency_notch_x)
+        notch_layout.addWidget(QLabel("y", page))
+        notch_layout.addWidget(self.frequency_notch_y)
+        notch_layout.addWidget(self.frequency_add_notch)
+        notch_layout.addWidget(self.frequency_remove_notch)
+        notch_layout.addWidget(self.frequency_clear_notches)
+        form.addRow(self.tr("陷波点"), notch_row)
+        form.addRow(self.frequency_notch_list)
         layout.addLayout(form)
         self.fft_button = QPushButton(page)
         self.ifft_button = QPushButton(page)
@@ -298,7 +346,16 @@ class ParamPanel(QGroupBox):
         self.frequency_filter_group.buttonClicked.connect(self._emit_frequency)
         self.frequency_pass_group.buttonClicked.connect(self._emit_frequency)
         self.frequency_cutoff.valueChanged.connect(self._emit_frequency)
+        self.frequency_band_width.valueChanged.connect(self._emit_frequency)
         self.frequency_order.valueChanged.connect(self._emit_frequency)
+        self.frequency_notch_radius.valueChanged.connect(self._emit_frequency)
+        self.frequency_mode_group.buttonClicked.connect(self._emit_frequency)
+        self.frequency_mode_group.buttonClicked.connect(
+            lambda button: self._sync_frequency_visibility()
+        )
+        self.frequency_add_notch.clicked.connect(self._add_notch_point)
+        self.frequency_remove_notch.clicked.connect(self._remove_notch_point)
+        self.frequency_clear_notches.clicked.connect(self._clear_notch_points)
         self.frequency_filter_group.buttonClicked.connect(
             lambda button: self._sync_frequency_visibility()
         )
@@ -536,6 +593,19 @@ class ParamPanel(QGroupBox):
         )
         self.frequency_order.setVisible(is_butterworth)
         self.frequency_order_label.setVisible(is_butterworth)
+        mode = self.frequency_mode_group.checkedButton().property("frequency_mode")
+        is_band = mode in ("bandpass", "bandstop", "bandreject")
+        is_notch = mode in ("notch", "notchreject", "notchpass")
+        self.frequency_band_width.setVisible(is_band)
+        self.frequency_band_width_label.setVisible(is_band)
+        self.frequency_notch_radius.setVisible(is_notch)
+        self.frequency_notch_radius_label.setVisible(is_notch)
+        self.frequency_notch_x.setVisible(is_notch)
+        self.frequency_notch_y.setVisible(is_notch)
+        self.frequency_add_notch.setVisible(is_notch)
+        self.frequency_remove_notch.setVisible(is_notch)
+        self.frequency_clear_notches.setVisible(is_notch)
+        self.frequency_notch_list.setVisible(is_notch)
 
     def _sync_transform_visibility(self) -> None:
         mode = self.transform_mode()
@@ -570,6 +640,16 @@ class ParamPanel(QGroupBox):
         for button in self.frequency_filter_group.buttons():
             button.setEnabled(enabled)
         self.frequency_cutoff.setEnabled(enabled)
+        self.frequency_mode_group.setExclusive(True)
+        for button in self.frequency_mode_group.buttons():
+            button.setEnabled(enabled)
+        self.frequency_band_width.setEnabled(enabled)
+        self.frequency_notch_radius.setEnabled(enabled)
+        self.frequency_notch_x.setEnabled(enabled)
+        self.frequency_notch_y.setEnabled(enabled)
+        self.frequency_add_notch.setEnabled(enabled)
+        self.frequency_remove_notch.setEnabled(enabled)
+        self.frequency_clear_notches.setEnabled(enabled)
         self.ifft_button.setEnabled(enabled)
         self.magnitude_ifft_button.setEnabled(enabled)
         self.phase_ifft_button.setEnabled(enabled)
@@ -604,6 +684,9 @@ class ParamPanel(QGroupBox):
             self.frequency_pass_group.buttons()[0].setChecked(True)
             self.frequency_cutoff.setValue(30)
             self.frequency_order.setValue(2)
+            self.frequency_band_width.setValue(20)
+            self.frequency_notch_radius.setValue(8)
+            self.frequency_notch_list.clear()
             self._sync_frequency_visibility()
             self._emit_frequency()
         elif operation == "geometry":
@@ -655,7 +738,43 @@ class ParamPanel(QGroupBox):
             cutoff=self.frequency_cutoff.value(),
             pass_type=self.frequency_pass_group.checkedButton().property("pass_type"),
             order=self.frequency_order.value(),
+            mode=self.frequency_mode_group.checkedButton().property("frequency_mode"),
+            band_width=self.frequency_band_width.value(),
+            notch_radius=self.frequency_notch_radius.value(),
+            notch_points=[
+                tuple(item.data(Qt.ItemDataRole.UserRole))
+                for item in (
+                    self.frequency_notch_list.item(index)
+                    for index in range(self.frequency_notch_list.count())
+                )
+            ],
         )
+
+    def _add_notch_point(self) -> None:
+        point = (self.frequency_notch_x.value(), self.frequency_notch_y.value())
+        self.add_notch_point(point)
+
+    def add_notch_point(self, point: tuple[float, float]) -> None:
+        point = (float(point[0]), float(point[1]))
+        if point not in [item.data(Qt.ItemDataRole.UserRole) for item in
+                         (self.frequency_notch_list.item(i)
+                          for i in range(self.frequency_notch_list.count()))]:
+            if self.frequency_notch_list.count() >= 128:
+                return
+            item = QListWidgetItem(f"({point[0]}, {point[1]})")
+            item.setData(Qt.ItemDataRole.UserRole, point)
+            self.frequency_notch_list.addItem(item)
+            self._emit_frequency()
+
+    def _remove_notch_point(self) -> None:
+        row = self.frequency_notch_list.currentRow()
+        if row >= 0:
+            self.frequency_notch_list.takeItem(row)
+            self._emit_frequency()
+
+    def _clear_notch_points(self) -> None:
+        self.frequency_notch_list.clear()
+        self._emit_frequency()
 
     def geometry_params(self) -> GeometryParams:
         return GeometryParams(
