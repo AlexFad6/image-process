@@ -776,6 +776,7 @@ class MainWindow(QMainWindow):
             self.params.set_frequency_controls_enabled(True)
         elif operation == "ifft":
             self.state.source = result
+            self.state.gray_source = result
             self.state.result = None
             self.state.clear_frequency_data()
             self.display_mode = "gray"
