@@ -26,6 +26,7 @@ from core.app_state import (
     BinarizationParams,
     EdgeParams,
     FrequencyParams,
+    HoughParams,
     GeometryParams,
     SpatialParams,
     TransformParams,
@@ -39,6 +40,7 @@ class ParamPanel(QGroupBox):
     geometryChanged = Signal(object)
     binarizationChanged = Signal(object)
     edgeChanged = Signal(object)
+    houghChanged = Signal(object)
     fftRequested = Signal()
     ifftRequested = Signal()
     magnitudeIfftRequested = Signal()
@@ -59,6 +61,7 @@ class ParamPanel(QGroupBox):
         self.geometry_page = self._create_geometry_page()
         self.binarization_page = self._create_binarization_page()
         self.edge_page = self._create_edge_page()
+        self.hough_page = self._create_hough_page()
         for page in (
             self.transform_page,
             self.spatial_page,
@@ -66,6 +69,7 @@ class ParamPanel(QGroupBox):
             self.geometry_page,
             self.binarization_page,
             self.edge_page,
+            self.hough_page,
         ):
             self.pages.addWidget(page)
         layout.addWidget(self.pages)
@@ -484,6 +488,76 @@ class ParamPanel(QGroupBox):
         self._sync_edge_visibility()
         return page
 
+    def _create_hough_page(self) -> QWidget:
+        page = QWidget(self)
+        form = QFormLayout(page)
+        self.hough_mode_group = QButtonGroup(page)
+        modes = QHBoxLayout()
+        for text, value in (("直线检测", "lines"), ("圆检测", "circles")):
+            button = QRadioButton(text, page)
+            button.setProperty("hough_mode", value)
+            self.hough_mode_group.addButton(button)
+            modes.addWidget(button)
+        self.hough_mode_group.buttons()[0].setChecked(True)
+        self.hough_mode_group.buttonClicked.connect(self._emit_hough)
+        self.hough_mode_group.buttonClicked.connect(lambda button: self._sync_hough_visibility())
+        form.addRow(modes)
+
+        self.hough_method_group = QButtonGroup(page)
+        methods = QHBoxLayout()
+        for text, value in (("标准", "HOUGH_STANDARD"), ("概率", "HOUGH_PROBABILISTIC")):
+            button = QRadioButton(text, page)
+            button.setProperty("hough_method", value)
+            self.hough_method_group.addButton(button)
+            methods.addWidget(button)
+        self.hough_method_group.buttons()[0].setChecked(True)
+        self.hough_method_group.buttonClicked.connect(self._emit_hough)
+        form.addRow(self.tr("直线方法"), methods)
+
+        def add_double(name, label, minimum, maximum, value, step=1.0):
+            widget = QDoubleSpinBox(page)
+            widget.setRange(minimum, maximum)
+            widget.setSingleStep(step)
+            widget.setValue(value)
+            widget.valueChanged.connect(self._emit_hough)
+            setattr(self, name, widget)
+            form.addRow(self.tr(label), widget)
+            setattr(self, name + "_label", form.labelForField(widget))
+
+        def add_int(name, label, minimum, maximum, value):
+            widget = QSpinBox(page)
+            widget.setRange(minimum, maximum)
+            widget.setValue(value)
+            widget.valueChanged.connect(self._emit_hough)
+            setattr(self, name, widget)
+            form.addRow(self.tr(label), widget)
+            setattr(self, name + "_label", form.labelForField(widget))
+
+        add_double("hough_rho", "rho", 0.01, 100, 1)
+        add_double("hough_theta", "theta (度)", 0.01, 180, 1)
+        add_int("hough_threshold", "阈值", 1, 10000, 100)
+        add_double("hough_min_line_length", "最小线长", 0, 10000, 50)
+        add_double("hough_max_line_gap", "最大间隙", 0, 10000, 10)
+        add_double("hough_dp", "dp", 1, 20, 1, 0.1)
+        add_double("hough_min_dist", "最小圆距", 0.1, 10000, 20)
+        add_double("hough_param1", "param1", 0.1, 10000, 100)
+        add_double("hough_param2", "param2", 0.1, 10000, 30)
+        add_int("hough_min_radius", "最小半径", 0, 10000, 0)
+        add_int("hough_max_radius", "最大半径", 0, 10000, 0)
+        add_int("hough_thickness", "线宽", 1, 50, 2)
+        self.hough_color = []
+        color_row = QHBoxLayout()
+        for value in (0, 0, 255):
+            spin = QSpinBox(page)
+            spin.setRange(0, 255)
+            spin.setValue(value)
+            spin.valueChanged.connect(self._emit_hough)
+            self.hough_color.append(spin)
+            color_row.addWidget(spin)
+        form.addRow(self.tr("颜色 BGR"), color_row)
+        self._sync_hough_visibility()
+        return page
+
     def retranslateUi(self) -> None:
         self.setTitle(self.tr("处理参数"))
         for label, text in zip(
@@ -505,6 +579,30 @@ class ParamPanel(QGroupBox):
 
     def _emit_edge(self, *_args) -> None:
         self.edgeChanged.emit(self.edge_params())
+
+    def _emit_hough(self, *_args) -> None:
+        self.houghChanged.emit(self.hough_params())
+
+    def _sync_hough_visibility(self) -> None:
+        is_lines = self.hough_mode_group.checkedButton().property("hough_mode") == "lines"
+        is_probability = (
+            self.hough_method_group.checkedButton().property("hough_method")
+            == "HOUGH_PROBABILISTIC"
+        )
+        for button in self.hough_method_group.buttons():
+            button.setVisible(is_lines)
+        for name in ("hough_rho", "hough_theta", "hough_threshold"):
+            getattr(self, name).setVisible(True)
+            getattr(self, name + "_label").setVisible(True)
+        for name in ("hough_min_line_length", "hough_max_line_gap"):
+            getattr(self, name).setVisible(is_lines and is_probability)
+            getattr(self, name + "_label").setVisible(is_lines and is_probability)
+        for name in (
+            "hough_dp", "hough_min_dist", "hough_param1", "hough_param2",
+            "hough_min_radius", "hough_max_radius",
+        ):
+            getattr(self, name).setVisible(not is_lines)
+            getattr(self, name + "_label").setVisible(not is_lines)
 
     def _sync_binarization_visibility(self) -> None:
         method = self.binarization_group.checkedButton().property("method")
@@ -654,6 +752,10 @@ class ParamPanel(QGroupBox):
         self.magnitude_ifft_button.setEnabled(enabled)
         self.phase_ifft_button.setEnabled(enabled)
 
+    def set_hough_controls_enabled(self, enabled: bool) -> None:
+        for widget in self.hough_page.findChildren(QWidget):
+            widget.setEnabled(enabled)
+
     def set_frequency_controls_enabled(self, enabled: bool) -> None:
         self._set_frequency_controls_enabled(enabled)
 
@@ -702,12 +804,37 @@ class ParamPanel(QGroupBox):
                 self._sync_binarization_visibility()
                 self._emit_binarization()
             else:
-                self.edge_method_group.buttons()[0].setChecked(True)
-                self.edge_direction_group.buttons()[-1].setChecked(True)
-                self.edge_low_threshold.setValue(50)
-                self.edge_high_threshold.setValue(150)
-                self._sync_edge_visibility()
-                self._emit_edge()
+                if operation == "edge":
+                    self.edge_method_group.buttons()[0].setChecked(True)
+                    self.edge_direction_group.buttons()[-1].setChecked(True)
+                    self.edge_low_threshold.setValue(50)
+                    self.edge_high_threshold.setValue(150)
+                    self._sync_edge_visibility()
+                    self._emit_edge()
+                else:
+                    self.hough_mode_group.buttons()[0].setChecked(True)
+                    self.hough_method_group.buttons()[0].setChecked(True)
+                    self._sync_hough_visibility()
+                    self._emit_hough()
+
+    def hough_params(self) -> HoughParams:
+        return HoughParams(
+            mode=self.hough_mode_group.checkedButton().property("hough_mode"),
+            method=self.hough_method_group.checkedButton().property("hough_method"),
+            rho=self.hough_rho.value(),
+            theta=self.hough_theta.value(),
+            threshold=self.hough_threshold.value(),
+            min_line_length=self.hough_min_line_length.value(),
+            max_line_gap=self.hough_max_line_gap.value(),
+            dp=self.hough_dp.value(),
+            min_dist=self.hough_min_dist.value(),
+            param1=self.hough_param1.value(),
+            param2=self.hough_param2.value(),
+            min_radius=self.hough_min_radius.value(),
+            max_radius=self.hough_max_radius.value(),
+            color=tuple(spin.value() for spin in self.hough_color),
+            thickness=self.hough_thickness.value(),
+        )
 
     def transform_params(self) -> TransformParams:
         return TransformParams(
@@ -805,6 +932,7 @@ class ParamPanel(QGroupBox):
             "geometry",
             "binarization",
             "edge",
+            "hough",
         )[self.pages.currentIndex()]
 
     def set_operation(self, operation: str) -> None:
@@ -815,6 +943,7 @@ class ParamPanel(QGroupBox):
             "geometry",
             "binarization",
             "edge",
+            "hough",
         ):
             raise ValueError(f"Unsupported operation: {operation}")
         self.pages.setCurrentIndex(
@@ -825,6 +954,7 @@ class ParamPanel(QGroupBox):
                 "geometry",
                 "binarization",
                 "edge",
+                "hough",
             ).index(operation)
         )
         self._set_frequency_controls_enabled(

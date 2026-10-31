@@ -63,6 +63,25 @@ class EdgeParams:
 
 
 @dataclass
+class HoughParams:
+    mode: str = "lines"
+    method: str = "HOUGH_STANDARD"
+    rho: float = 1.0
+    theta: float = 1.0
+    threshold: int = 100
+    min_line_length: float = 50.0
+    max_line_gap: float = 10.0
+    dp: float = 1.0
+    min_dist: float = 20.0
+    param1: float = 100.0
+    param2: float = 30.0
+    min_radius: int = 0
+    max_radius: int = 0
+    color: tuple[int, int, int] = (0, 0, 255)
+    thickness: int = 2
+
+
+@dataclass
 class AppState:
     source: Optional[np.ndarray] = None
     gray_source: Optional[np.ndarray] = None
@@ -74,6 +93,7 @@ class AppState:
     geometry_params: GeometryParams = field(default_factory=GeometryParams)
     binarization_params: BinarizationParams = field(default_factory=BinarizationParams)
     edge_params: EdgeParams = field(default_factory=EdgeParams)
+    hough_params: HoughParams = field(default_factory=HoughParams)
     operation_log: list[dict] = field(default_factory=list)
     frequency_data: Optional[np.ndarray] = None
     fft_spectrum_uint8: Optional[np.ndarray] = None
@@ -93,6 +113,7 @@ class AppState:
         self.geometry_params = GeometryParams()
         self.binarization_params = BinarizationParams()
         self.edge_params = EdgeParams()
+        self.hough_params = HoughParams()
         self.operation_log.clear()
         self.clear_frequency_data()
 

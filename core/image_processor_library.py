@@ -289,6 +289,118 @@ class LibraryImageProcessor:
         raise ValueError(f"Unsupported edge detection method: {method}")
 
     @staticmethod
+    def _hough_gray(image: np.ndarray) -> np.ndarray:
+        values = np.asarray(image)
+        if values.ndim == 3:
+            if values.shape[2] == 4:
+                values = cv2.cvtColor(values.astype(np.uint8), cv2.COLOR_BGRA2GRAY)
+            elif values.shape[2] == 3:
+                values = cv2.cvtColor(values.astype(np.uint8), cv2.COLOR_BGR2GRAY)
+            else:
+                raise ValueError("Image must be grayscale or have 3/4 channels")
+        if values.ndim != 2:
+            raise ValueError("Image must be a 2D grayscale image")
+        return np.asarray(values, dtype=np.uint8)
+
+    @staticmethod
+    def hough_lines(
+        image: np.ndarray,
+        method: str,
+        rho: float,
+        theta: float,
+        threshold: int,
+        min_line_length: float,
+        max_line_gap: float,
+    ) -> list[tuple]:
+        if rho <= 0 or theta <= 0 or threshold <= 0:
+            raise ValueError("rho, theta and threshold must be greater than zero")
+        if min_line_length < 0 or max_line_gap < 0:
+            raise ValueError("Line length and gap cannot be negative")
+        gray = LibraryImageProcessor._hough_gray(image)
+        if method == "HOUGH_STANDARD":
+            detected = cv2.HoughLines(gray, rho, np.deg2rad(theta), int(threshold))
+            return (
+                [(float(line[0][0]), float(line[0][1])) for line in detected]
+                if detected is not None else []
+            )
+        if method == "HOUGH_PROBABILISTIC":
+            detected = cv2.HoughLinesP(
+                gray, rho, np.deg2rad(theta), int(threshold),
+                minLineLength=float(min_line_length), maxLineGap=float(max_line_gap),
+            )
+            return (
+                [tuple(int(value) for value in line) for line in np.asarray(detected).reshape(-1, 4)]
+                if detected is not None else []
+            )
+        raise ValueError("Unsupported Hough line method")
+
+    @staticmethod
+    def hough_circles(
+        image: np.ndarray,
+        dp: float,
+        min_dist: float,
+        param1: float,
+        param2: float,
+        min_radius: int,
+        max_radius: int,
+    ) -> list[tuple[float, float, float]]:
+        if dp < 1 or min_dist <= 0 or param1 <= 0 or param2 <= 0:
+            raise ValueError("dp must be >= 1 and circle parameters must be positive")
+        if min_radius < 0 or max_radius < 0 or min_radius > max_radius:
+            raise ValueError("Invalid circle radius range")
+        gray = LibraryImageProcessor._hough_gray(image)
+        blurred = cv2.medianBlur(gray, 5)
+        detected = cv2.HoughCircles(
+            blurred, cv2.HOUGH_GRADIENT, dp, min_dist,
+            param1=param1, param2=param2,
+            minRadius=int(min_radius), maxRadius=int(max_radius),
+        )
+        return [tuple(float(value) for value in circle) for circle in detected[0]] if detected is not None else []
+
+    @staticmethod
+    def draw_lines(image: np.ndarray, lines, color, thickness: int) -> np.ndarray:
+        if thickness <= 0:
+            raise ValueError("Line thickness must be positive")
+        output = np.asarray(image).copy()
+        if output.ndim == 2:
+            output = cv2.cvtColor(output.astype(np.uint8), cv2.COLOR_GRAY2BGR)
+        for line in lines:
+            if len(line) == 2:
+                rho, angle = line
+                a, b = np.cos(angle), np.sin(angle)
+                x0, y0 = a * rho, b * rho
+                points = (
+                    (int(x0 + 10000 * -b), int(y0 + 10000 * a)),
+                    (int(x0 - 10000 * -b), int(y0 - 10000 * a)),
+                )
+            else:
+                points = ((int(line[0]), int(line[1])), (int(line[2]), int(line[3])))
+            cv2.line(output, points[0], points[1], tuple(color), int(thickness))
+        return output
+
+    @staticmethod
+    def draw_circles(image: np.ndarray, circles, color, thickness: int) -> np.ndarray:
+        if thickness <= 0:
+            raise ValueError("Circle thickness must be positive")
+        output = np.asarray(image).copy()
+        if output.ndim == 2:
+            output = cv2.cvtColor(output.astype(np.uint8), cv2.COLOR_GRAY2BGR)
+        for x, y, radius in circles:
+            cv2.circle(output, (round(x), round(y)), round(radius), tuple(color), int(thickness))
+        return output
+
+    @staticmethod
+    def compute_hough_stats(items) -> dict:
+        values = list(items)
+        stats = {"count": len(values)}
+        if values and len(values[0]) == 2:
+            stats["angle_degrees"] = [round(float(np.rad2deg(item[1])), 2) for item in values]
+        elif values:
+            radii = [float(item[2]) for item in values]
+            stats["radius_range"] = (min(radii), max(radii))
+        return stats
+
+    @staticmethod
     def compute_fft(gray_uint8: np.ndarray) -> np.ndarray:
         """Return the centered OpenCV complex spectrum as float32 HxWx2 data."""
         gray_float32 = np.asarray(gray_uint8, dtype=np.float32)

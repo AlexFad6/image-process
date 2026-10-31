@@ -124,6 +124,28 @@ class ProcessingWorker(QObject):
                     params.high_threshold,
                 )
                 self.finished.emit(result, self.generation)
+            elif self.operation == "hough":
+                processor, image, params = self.payload
+                processor = LibraryImageProcessor
+                if params.mode == "lines":
+                    items = processor.hough_lines(
+                        image, params.method, params.rho, params.theta,
+                        params.threshold, params.min_line_length, params.max_line_gap,
+                    )
+                    result_image = processor.draw_lines(
+                        image, items, params.color, params.thickness
+                    )
+                else:
+                    items = processor.hough_circles(
+                        image, params.dp, params.min_dist, params.param1,
+                        params.param2, params.min_radius, params.max_radius,
+                    )
+                    result_image = processor.draw_circles(
+                        image, items, params.color, params.thickness
+                    )
+                self.finished.emit(
+                    (result_image, processor.compute_hough_stats(items)), self.generation
+                )
             elif self.operation == "transform":
                 processor, image, params = self.payload
                 if params.mode == "linear":
@@ -267,6 +289,7 @@ class MainWindow(QMainWindow):
         self.params.geometryChanged.connect(self.apply_geometry_params)
         self.params.binarizationChanged.connect(self.apply_binarization_params)
         self.params.edgeChanged.connect(self.apply_edge_params)
+        self.params.houghChanged.connect(self.apply_hough_params)
         self.params.fftRequested.connect(self.compute_fft)
         self.params.ifftRequested.connect(self.apply_ifft)
         self.params.magnitudeIfftRequested.connect(
@@ -382,6 +405,7 @@ class MainWindow(QMainWindow):
             ("几何变换", "geometry"),
             ("二值化", "binarization"),
             ("边缘检测", "edge"),
+            ("霍夫变换", "hough"),
         )
         self.operation_actions: dict[str, QAction] = {}
         for text, operation in operations:
@@ -412,6 +436,8 @@ class MainWindow(QMainWindow):
             self.apply_binarization_params(self.params.binarization_params())
         elif operation == "edge":
             self.apply_edge_params(self.params.edge_params())
+        elif operation == "hough":
+            self.apply_hough_params(self.params.hough_params())
 
     def _handle_frequency_click(self, scene_x: float, scene_y: float) -> None:
         if self.params.operation_name() != "frequency" or self.state.frequency_data is None:
@@ -452,6 +478,7 @@ class MainWindow(QMainWindow):
         self.operation_actions["geometry"].setText(self.tr("几何变换"))
         self.operation_actions["binarization"].setText(self.tr("二值化"))
         self.operation_actions["edge"].setText(self.tr("边缘检测"))
+        self.operation_actions["hough"].setText(self.tr("霍夫变换"))
         self.images.retranslateUi()
         self.params.retranslateUi()
         self.attributes.retranslateUi()
@@ -725,6 +752,17 @@ class MainWindow(QMainWindow):
             (self.processor, self.state.source.copy(), params),
         )
 
+    def apply_hough_params(self, params) -> None:
+        if self.state.source is None:
+            return
+        self._processing_generation += 1
+        self.state.hough_params = params
+        if self.state.source.ndim == 3:
+            self.statusBar().showMessage(self.tr("霍夫检测将先将彩色图像转换为灰度图"))
+        self._start_processing(
+            "hough", (self.processor, self.state.source.copy(), params)
+        )
+
     def _run_pending_spatial(self) -> None:
         if self.state.source is None or self.state.source.ndim != 2:
             return
@@ -789,6 +827,17 @@ class MainWindow(QMainWindow):
             self.state.result_frequency_data = None
             self.state.result_fft_spectrum_uint8 = None
             self.state.result_phase_spectrum_uint8 = None
+            self.display_mode = "original"
+        elif operation == "hough":
+            result_image, stats = result
+            self.state.result = result_image
+            self.state.result_frequency_data = None
+            self.state.result_fft_spectrum_uint8 = None
+            self.state.result_phase_spectrum_uint8 = None
+            kind = "直线" if self.state.hough_params.mode == "lines" else "圆"
+            self.statusBar().showMessage(
+                self.tr(f"霍夫检测完成：{kind} {stats['count']} 个")
+            )
             self.display_mode = "original"
         elif operation == "transform":
             self._apply_transform_result(result)
