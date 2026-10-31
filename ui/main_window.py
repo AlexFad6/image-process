@@ -809,7 +809,6 @@ class MainWindow(QMainWindow):
             self.state.result_frequency_data = filtered
             self.state.result_fft_spectrum_uint8 = spectrum
             self.state.result_phase_spectrum_uint8 = phase
-            self.display_mode = "original"
             self.params.set_frequency_controls_enabled(True)
         elif operation == "ifft":
             self.state.source = result
