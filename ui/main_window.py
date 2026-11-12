@@ -71,15 +71,7 @@ class ProcessingWorker(QObject):
         try:
             if self.operation == "spatial":
                 processor, image, params = self.payload
-                if params.filter_type == "gaussian_noise":
-                    result = processor.gaussian_noise(
-                        image, params.gaussian_mean, params.gaussian_std
-                    )
-                elif params.filter_type == "salt_pepper_noise":
-                    result = processor.salt_pepper_noise(
-                        image, params.salt_pepper_amount
-                    )
-                elif params.filter_type == "median":
+                if params.filter_type == "median":
                     result = processor.median_filter(
                         image, params.kernel_size, params.median_ratio
                     )
@@ -102,6 +94,19 @@ class ProcessingWorker(QObject):
                         kernel_size, params.filter_type
                     )
                     result = processor.spatial_filter(image, kernel)
+                self.finished.emit(result, self.generation)
+            elif self.operation == "noise":
+                processor, image, params = self.payload
+                if params.filter_type == "gaussian_noise":
+                    result = processor.gaussian_noise(
+                        image, params.gaussian_mean, params.gaussian_std, params.seed
+                    )
+                elif params.filter_type == "salt_pepper_noise":
+                    result = processor.salt_pepper_noise(
+                        image, params.salt_pepper_amount, params.seed
+                    )
+                else:
+                    raise ValueError(f"Unsupported noise type: {params.filter_type}")
                 self.finished.emit(result, self.generation)
             elif self.operation == "geometry":
                 processor, image, params = self.payload
@@ -319,6 +324,7 @@ class MainWindow(QMainWindow):
         self.images.convertToGrayRequested.connect(self.convert_to_gray)
         self.images.displayModeRequested.connect(self.schedule_display_mode_switch)
         self.params.changed.connect(self.apply_params)
+        self.params.noiseChanged.connect(self.apply_noise_params)
         self.params.spatialChanged.connect(self.apply_spatial_params)
         self.params.geometryChanged.connect(self.apply_geometry_params)
         self.params.binarizationChanged.connect(self.apply_binarization_params)
@@ -434,6 +440,7 @@ class MainWindow(QMainWindow):
         operation_group.setExclusive(True)
         operations = (
             ("灰度变换", "gray"),
+            ("噪声添加", "noise"),
             ("空间滤波", "spatial"),
             ("频域滤波", "frequency"),
             ("几何变换", "geometry"),
@@ -462,7 +469,9 @@ class MainWindow(QMainWindow):
             self.attributes.set_result(None)
             self._set_frequency_controls_enabled(False)
         self.params.set_operation(operation)
-        if operation == "spatial":
+        if operation == "noise":
+            self.apply_noise_params(self.params.noise_params())
+        elif operation == "spatial":
             self.apply_spatial_params(self.params.spatial_params())
         elif operation == "geometry":
             self.apply_geometry_params(self.params.geometry_params())
@@ -507,6 +516,7 @@ class MainWindow(QMainWindow):
         self.about_action.setText(self.tr("关于"))
         self.processing_toolbar.setWindowTitle(self.tr("图像处理"))
         self.operation_actions["gray"].setText(self.tr("灰度变换"))
+        self.operation_actions["noise"].setText(self.tr("噪声添加"))
         self.operation_actions["spatial"].setText(self.tr("空间滤波"))
         self.operation_actions["frequency"].setText(self.tr("频域滤波"))
         self.operation_actions["geometry"].setText(self.tr("几何变换"))
@@ -756,6 +766,15 @@ class MainWindow(QMainWindow):
         self._pending_spatial = params
         self.spatial_timer.start()
 
+    def apply_noise_params(self, params) -> None:
+        if self.state.source is None or self.state.source.ndim != 2:
+            return
+        self._processing_generation += 1
+        self._start_processing(
+            "noise",
+            (self.processor, self.state.source.copy(), params),
+        )
+
     def apply_geometry_params(self, params) -> None:
         if self.state.source is None:
             return
@@ -838,7 +857,7 @@ class MainWindow(QMainWindow):
         if generation != self._processing_generation:
             return
         operation = self._processing_jobs[generation][1].operation
-        if operation == "spatial":
+        if operation in ("spatial", "noise"):
             self.state.result = result
             self.state.result_frequency_data = None
             self.state.result_fft_spectrum_uint8 = None

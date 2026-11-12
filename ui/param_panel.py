@@ -37,6 +37,7 @@ from core.app_state import (
 
 class ParamPanel(QGroupBox):
     changed = Signal(object)
+    noiseChanged = Signal(object)
     spatialChanged = Signal(object)
     frequencyChanged = Signal(object)
     geometryChanged = Signal(object)
@@ -58,6 +59,7 @@ class ParamPanel(QGroupBox):
 
         self.pages = QStackedWidget(self)
         self.transform_page = self._create_transform_page()
+        self.noise_page = self._create_noise_page()
         self.spatial_page = self._create_spatial_page()
         self.frequency_page = self._create_frequency_page()
         self.geometry_page = self._create_geometry_page()
@@ -66,6 +68,7 @@ class ParamPanel(QGroupBox):
         self.hough_page = self._create_hough_page()
         for page in (
             self.transform_page,
+            self.noise_page,
             self.spatial_page,
             self.frequency_page,
             self.geometry_page,
@@ -159,8 +162,6 @@ class ParamPanel(QGroupBox):
             ("Sobel Y", "sobel_y"),
             ("中值滤波", "median"),
             ("USM 锐化", "usm"),
-            ("高斯白噪声", "gaussian_noise"),
-            ("椒盐噪声", "salt_pepper_noise"),
         ):
             button = QRadioButton(text, page)
             button.setProperty("filter_type", value)
@@ -196,19 +197,6 @@ class ParamPanel(QGroupBox):
         self.usm_amount.setValue(1.5)
         self.usm_amount.setSingleStep(0.1)
         self.usm_amount.valueChanged.connect(self._emit_spatial)
-        self.gaussian_mean = QDoubleSpinBox(page)
-        self.gaussian_mean.setRange(-255, 255)
-        self.gaussian_mean.setValue(0)
-        self.gaussian_mean.valueChanged.connect(self._emit_spatial)
-        self.gaussian_std = QDoubleSpinBox(page)
-        self.gaussian_std.setRange(0, 255)
-        self.gaussian_std.setValue(20)
-        self.gaussian_std.valueChanged.connect(self._emit_spatial)
-        self.salt_pepper_amount = QDoubleSpinBox(page)
-        self.salt_pepper_amount.setRange(0, 100)
-        self.salt_pepper_amount.setValue(5)
-        self.salt_pepper_amount.setSuffix("%")
-        self.salt_pepper_amount.valueChanged.connect(self._emit_spatial)
         form.addRow(spatial_filters)
         form.addRow(self.tr("核大小"), self.kernel_size)
         self.kernel_size_label = form.labelForField(self.kernel_size)
@@ -236,6 +224,46 @@ class ParamPanel(QGroupBox):
         usm_amount_layout.addWidget(self.usm_amount)
         form.addRow(self.tr("锐化强度"), self.usm_amount_row)
         self.usm_amount_label = form.labelForField(self.usm_amount_row)
+        self._sync_spatial_visibility()
+        return page
+
+    def _create_noise_page(self) -> QWidget:
+        page = QWidget(self)
+        form = QFormLayout(page)
+        self.noise_group = QButtonGroup(page)
+        noise_options = QVBoxLayout()
+        for text, value in (
+            ("高斯白噪声", "gaussian_noise"),
+            ("椒盐噪声", "salt_pepper_noise"),
+        ):
+            button = QRadioButton(text, page)
+            button.setProperty("filter_type", value)
+            self.noise_group.addButton(button)
+            noise_options.addWidget(button)
+        self.noise_group.buttons()[0].setChecked(True)
+        self.noise_group.buttonClicked.connect(self._emit_noise)
+        self.noise_group.buttonClicked.connect(
+            lambda button: self._sync_noise_visibility()
+        )
+        self.gaussian_mean = QDoubleSpinBox(page)
+        self.gaussian_mean.setRange(-255, 255)
+        self.gaussian_mean.setValue(0)
+        self.gaussian_mean.valueChanged.connect(self._emit_noise)
+        self.gaussian_std = QDoubleSpinBox(page)
+        self.gaussian_std.setRange(0, 255)
+        self.gaussian_std.setValue(20)
+        self.gaussian_std.valueChanged.connect(self._emit_noise)
+        self.salt_pepper_amount = QDoubleSpinBox(page)
+        self.salt_pepper_amount.setRange(0, 100)
+        self.salt_pepper_amount.setValue(5)
+        self.salt_pepper_amount.setSuffix("%")
+        self.salt_pepper_amount.valueChanged.connect(self._emit_noise)
+        self.seed = QSpinBox(page)
+        self.seed.setRange(0, 2147483647)
+        self.seed.setValue(0)
+        self.seed.valueChanged.connect(self._emit_noise)
+        form.addRow(self.tr("随机种子"), self.seed)
+        form.addRow(noise_options)
         self.gaussian_mean_row = QWidget(page)
         gaussian_mean_layout = QHBoxLayout(self.gaussian_mean_row)
         gaussian_mean_layout.setContentsMargins(0, 0, 0, 0)
@@ -254,7 +282,7 @@ class ParamPanel(QGroupBox):
         salt_pepper_layout.addWidget(self.salt_pepper_amount)
         form.addRow(self.tr("噪声比例"), self.salt_pepper_amount_row)
         self.salt_pepper_amount_label = form.labelForField(self.salt_pepper_amount_row)
-        self._sync_spatial_visibility()
+        self._sync_noise_visibility()
         return page
 
     def _create_frequency_page(self) -> QWidget:
@@ -768,6 +796,9 @@ class ParamPanel(QGroupBox):
     def _emit_spatial(self, *_args) -> None:
         self.spatialChanged.emit(self.spatial_params())
 
+    def _emit_noise(self, *_args) -> None:
+        self.noiseChanged.emit(self.noise_params())
+
     def _emit_frequency(self, *_args) -> None:
         self.frequencyChanged.emit(self.frequency_params())
 
@@ -814,6 +845,9 @@ class ParamPanel(QGroupBox):
         self.bilateral_sigma_space_label.setVisible(filter_type == "bilateral")
         self.usm_amount_row.setVisible(filter_type == "usm")
         self.usm_amount_label.setVisible(filter_type == "usm")
+
+    def _sync_noise_visibility(self) -> None:
+        filter_type = self.noise_group.checkedButton().property("filter_type")
         self.gaussian_mean_label.setVisible(filter_type == "gaussian_noise")
         self.gaussian_std_label.setVisible(filter_type == "gaussian_noise")
         self.salt_pepper_amount_label.setVisible(filter_type == "salt_pepper_noise")
@@ -863,11 +897,16 @@ class ParamPanel(QGroupBox):
             self.bilateral_sigma_color.setValue(75)
             self.bilateral_sigma_space.setValue(75)
             self.usm_amount.setValue(1.5)
+            self._sync_spatial_visibility()
+            self._emit_spatial()
+        elif operation == "noise":
+            self.noise_group.buttons()[0].setChecked(True)
             self.gaussian_mean.setValue(0)
             self.gaussian_std.setValue(20)
             self.salt_pepper_amount.setValue(5)
-            self._sync_spatial_visibility()
-            self._emit_spatial()
+            self.seed.setValue(0)
+            self._sync_noise_visibility()
+            self._emit_noise()
         elif operation == "frequency":
             self.frequency_filter_group.buttons()[0].setChecked(True)
             self.frequency_pass_group.buttons()[0].setChecked(True)
@@ -941,9 +980,24 @@ class ParamPanel(QGroupBox):
             bilateral_sigma_color=self.bilateral_sigma_color.value(),
             bilateral_sigma_space=self.bilateral_sigma_space.value(),
             usm_amount=self.usm_amount.value(),
+            gaussian_mean=0,
+            gaussian_std=20,
+            salt_pepper_amount=5,
+            seed=0,
+        )
+
+    def noise_params(self) -> SpatialParams:
+        return SpatialParams(
+            filter_type=self.noise_group.checkedButton().property("filter_type"),
+            kernel_size=self.kernel_size.value(),
+            median_ratio=self.median_ratio.value(),
+            bilateral_sigma_color=self.bilateral_sigma_color.value(),
+            bilateral_sigma_space=self.bilateral_sigma_space.value(),
+            usm_amount=self.usm_amount.value(),
             gaussian_mean=self.gaussian_mean.value(),
             gaussian_std=self.gaussian_std.value(),
             salt_pepper_amount=self.salt_pepper_amount.value(),
+            seed=self.seed.value(),
         )
 
     def frequency_params(self) -> FrequencyParams:
@@ -1037,6 +1091,7 @@ class ParamPanel(QGroupBox):
     def operation_name(self) -> str:
         return (
             "gray",
+            "noise",
             "spatial",
             "frequency",
             "geometry",
@@ -1048,6 +1103,7 @@ class ParamPanel(QGroupBox):
     def set_operation(self, operation: str) -> None:
         if operation not in (
             "gray",
+            "noise",
             "spatial",
             "frequency",
             "geometry",
@@ -1059,6 +1115,7 @@ class ParamPanel(QGroupBox):
         self.pages.setCurrentIndex(
             (
                 "gray",
+                "noise",
                 "spatial",
                 "frequency",
                 "geometry",

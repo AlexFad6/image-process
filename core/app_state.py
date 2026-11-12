@@ -27,6 +27,7 @@ class SpatialParams:
     gaussian_mean: float = 0.0
     gaussian_std: float = 20.0
     salt_pepper_amount: float = 5.0
+    seed: int = 0
 
 
 @dataclass
