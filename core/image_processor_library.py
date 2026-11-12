@@ -232,6 +232,112 @@ class LibraryImageProcessor:
         raise ValueError(f"Unsupported geometric transform: {transform_type}")
 
     @staticmethod
+    def _interpolation(value: str) -> int:
+        values = {
+            "nearest": cv2.INTER_NEAREST,
+            "linear": cv2.INTER_LINEAR,
+            "cubic": cv2.INTER_CUBIC,
+            "area": cv2.INTER_AREA,
+        }
+        if value not in values:
+            raise ValueError(f"Unsupported interpolation: {value}")
+        return values[value]
+
+    @staticmethod
+    def resize_image(
+        image: np.ndarray, width: int, height: int, interpolation: str = "linear",
+        keep_aspect: bool = False,
+    ) -> np.ndarray:
+        values = np.asarray(image)
+        if width < 1 or height < 1 or width > 16384 or height > 16384:
+            raise ValueError("Resize dimensions must be between 1 and 16384")
+        if keep_aspect:
+            scale = min(width / values.shape[1], height / values.shape[0])
+            width = max(1, round(values.shape[1] * scale))
+            height = max(1, round(values.shape[0] * scale))
+        return cv2.resize(values, (int(width), int(height)), interpolation=LibraryImageProcessor._interpolation(interpolation))
+
+    @staticmethod
+    def crop_image(image: np.ndarray, x: int, y: int, width: int, height: int) -> np.ndarray:
+        values = np.asarray(image)
+        if width < 1 or height < 1:
+            raise ValueError("Crop dimensions must be positive")
+        left, top = max(0, int(x)), max(0, int(y))
+        right, bottom = min(values.shape[1], int(x) + int(width)), min(values.shape[0], int(y) + int(height))
+        if left >= right or top >= bottom:
+            raise ValueError("Crop rectangle does not intersect the image")
+        return values[top:bottom, left:right].copy()
+
+    @staticmethod
+    def rotate_arbitrary(
+        image: np.ndarray, angle: float, center=None, scale: float = 1.0,
+        border_mode: str = "constant", border_value=0, interpolation: str = "linear",
+    ) -> np.ndarray:
+        if not np.isfinite(angle) or abs(angle) > 36000 or scale <= 0 or scale > 100:
+            raise ValueError("Invalid rotation angle or scale")
+        height, width = image.shape[:2]
+        if center is None:
+            center = (width / 2.0, height / 2.0)
+        if len(center) != 2 or not all(np.isfinite(v) for v in center):
+            raise ValueError("Rotation center must contain two finite coordinates")
+        borders = {"constant": cv2.BORDER_CONSTANT, "replicate": cv2.BORDER_REPLICATE,
+                   "reflect": cv2.BORDER_REFLECT, "reflect101": cv2.BORDER_REFLECT_101}
+        if border_mode not in borders:
+            raise ValueError("Unsupported border mode")
+        matrix = cv2.getRotationMatrix2D(tuple(center), float(angle), float(scale))
+        return cv2.warpAffine(
+            image, matrix, (width, height), flags=LibraryImageProcessor._interpolation(interpolation),
+            borderMode=borders[border_mode], borderValue=border_value,
+        )
+
+    @staticmethod
+    def _points(points, count: int, width: int, height: int) -> np.ndarray:
+        if len(points) != count:
+            raise ValueError(f"Exactly {count} points are required")
+        values = np.asarray(points, dtype=np.float32)
+        if values.shape != (count, 2) or not np.isfinite(values).all():
+            raise ValueError("Points must be finite x/y pairs")
+        if (values[:, 0] < 0).any() or (values[:, 0] >= width).any() or (values[:, 1] < 0).any() or (values[:, 1] >= height).any():
+            raise ValueError("Point is outside the image")
+        return values
+
+    @staticmethod
+    def affine_transform(image, src_points, dst_points, output_size=None) -> np.ndarray:
+        height, width = image.shape[:2]
+        src = LibraryImageProcessor._points(src_points, 3, width, height)
+        dst = np.asarray(dst_points, dtype=np.float32)
+        if dst.shape != (3, 2) or not np.isfinite(dst).all():
+            raise ValueError("Invalid destination points")
+        if abs(cv2.contourArea(src)) < 1e-5:
+            raise ValueError("Affine source points must not be collinear")
+        size = output_size or (width, height)
+        if len(size) != 2 or min(size) < 1 or max(size) > 16384:
+            raise ValueError("Invalid affine output size")
+        return cv2.warpAffine(image, cv2.getAffineTransform(src, dst), tuple(map(int, size)))
+
+    @staticmethod
+    def perspective_transform(image, src_points, dst_points, output_size=None) -> np.ndarray:
+        height, width = image.shape[:2]
+        src = LibraryImageProcessor._points(src_points, 4, width, height)
+        dst = np.asarray(dst_points, dtype=np.float32)
+        if dst.shape != (4, 2) or not np.isfinite(dst).all():
+            raise ValueError("Invalid destination points")
+        if abs(cv2.contourArea(src)) < 1e-5 or abs(cv2.contourArea(dst)) < 1e-5:
+            raise ValueError("Perspective points must form a non-degenerate quadrilateral")
+        if output_size is None:
+            min_xy, max_xy = dst.min(axis=0), dst.max(axis=0)
+            size = (
+                max(1, int(np.ceil(max_xy[0] - min_xy[0])) + 1),
+                max(1, int(np.ceil(max_xy[1] - min_xy[1])) + 1),
+            )
+            dst = dst - min_xy
+        else:
+            size = output_size
+        if len(size) != 2 or min(size) < 1 or max(size) > 16384:
+            raise ValueError("Invalid perspective output size")
+        return cv2.warpPerspective(image, cv2.getPerspectiveTransform(src, dst), tuple(map(int, size)))
+
+    @staticmethod
     def binarize(
         image: np.ndarray, method: str, threshold: float, block_size: int, c: float
     ) -> np.ndarray:

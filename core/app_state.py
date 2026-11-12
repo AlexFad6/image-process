@@ -44,6 +44,25 @@ class FrequencyParams:
 @dataclass
 class GeometryParams:
     transform_type: str = "rotate_cw_90"
+    width: int = 640
+    height: int = 480
+    keep_aspect: bool = False
+    interpolation: str = "linear"
+    x: int = 0
+    y: int = 0
+    crop_width: int = 100
+    crop_height: int = 100
+    angle: float = 0.0
+    center_x: float = 0.0
+    center_y: float = 0.0
+    scale: float = 1.0
+    border_mode: str = "constant"
+    border_value: int = 0
+    rotation_interpolation: str = "linear"
+    src_points: tuple[tuple[float, float], ...] = ()
+    dst_points: tuple[tuple[float, float], ...] = ()
+    output_width: int = 0
+    output_height: int = 0
 
 
 @dataclass

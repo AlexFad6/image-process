@@ -4,6 +4,8 @@ from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QButtonGroup,
+    QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QGridLayout,
@@ -373,7 +375,9 @@ class ParamPanel(QGroupBox):
 
     def _create_geometry_page(self) -> QWidget:
         page = QWidget(self)
-        layout = QVBoxLayout(page)
+        page.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        page.setMinimumSize(0, 0)
+        form = QFormLayout(page)
         self.geometry_group = QButtonGroup(page)
         for text, value in (
             ("顺时针旋转 90°", "rotate_cw_90"),
@@ -381,14 +385,75 @@ class ParamPanel(QGroupBox):
             ("旋转 180°", "rotate_180"),
             ("水平翻转", "flip_horizontal"),
             ("垂直翻转", "flip_vertical"),
+            ("缩放", "resize"),
+            ("裁剪", "crop"),
+            ("任意角度旋转", "rotate"),
+            ("仿射变换", "affine"),
+            ("透视变换", "perspective"),
         ):
             button = QRadioButton(text, page)
             button.setProperty("transform_type", value)
             self.geometry_group.addButton(button)
-            layout.addWidget(button)
+            form.addRow(button)
         self.geometry_group.buttons()[0].setChecked(True)
         self.geometry_group.buttonClicked.connect(self._emit_geometry)
-        layout.addStretch()
+        self.geometry_group.buttonClicked.connect(lambda button: self._sync_geometry_visibility())
+
+        def combo(name, items):
+            widget = QComboBox(page)
+            for text, value in items:
+                widget.addItem(text, value)
+            widget.currentIndexChanged.connect(self._emit_geometry)
+            setattr(self, name, widget)
+            form.addRow(name, widget)
+            setattr(self, name + "_label", form.labelForField(widget))
+            return widget
+        def integer(name, label, value, maximum=16384):
+            widget = QSpinBox(page)
+            widget.setRange(0, maximum)
+            widget.setValue(value)
+            widget.valueChanged.connect(self._emit_geometry)
+            setattr(self, name, widget)
+            form.addRow(label, widget)
+            setattr(self, name + "_label", form.labelForField(widget))
+            return widget
+        def decimal(name, label, value, minimum=-10000, maximum=10000):
+            widget = QDoubleSpinBox(page)
+            widget.setRange(minimum, maximum)
+            widget.setValue(value)
+            widget.valueChanged.connect(self._emit_geometry)
+            setattr(self, name, widget)
+            form.addRow(label, widget)
+            setattr(self, name + "_label", form.labelForField(widget))
+            return widget
+
+        integer("geometry_width", "宽度", 640)
+        integer("geometry_height", "高度", 480)
+        self.geometry_keep_aspect = QCheckBox(self.tr("保持宽高比"), page)
+        self.geometry_keep_aspect.toggled.connect(self._emit_geometry)
+        form.addRow(self.geometry_keep_aspect)
+        combo("geometry_interpolation", (("最近邻", "nearest"), ("双线性", "linear"), ("双三次", "cubic"), ("面积", "area")))
+        integer("geometry_x", "x", 0)
+        integer("geometry_y", "y", 0)
+        integer("geometry_crop_width", "裁剪宽度", 100)
+        integer("geometry_crop_height", "裁剪高度", 100)
+        decimal("geometry_angle", "角度", 0, -36000, 36000)
+        decimal("geometry_center_x", "中心 x", 0)
+        decimal("geometry_center_y", "中心 y", 0)
+        decimal("geometry_scale", "缩放比例", 1, 0.01, 100)
+        combo("geometry_border_mode", (("常量", "constant"), ("复制", "replicate"), ("反射", "reflect"), ("反射101", "reflect101")))
+        combo("geometry_transform_interpolation", (("最近邻", "nearest"), ("双线性", "linear"), ("双三次", "cubic"), ("面积", "area")))
+        self.geometry_points = []
+        for prefix, title, count in (("src", "源点", 4), ("dst", "目标点", 4)):
+            for index in range(count):
+                x = decimal(f"geometry_{prefix}_{index}_x", f"{title}{index + 1} x", 0)
+                y = decimal(f"geometry_{prefix}_{index}_y", f"{title}{index + 1} y", 0)
+                x.setProperty("geometry_label", getattr(self, f"geometry_{prefix}_{index}_x_label"))
+                y.setProperty("geometry_label", getattr(self, f"geometry_{prefix}_{index}_y_label"))
+                self.geometry_points.extend((x, y))
+        integer("geometry_output_width", "输出宽度", 0)
+        integer("geometry_output_height", "输出高度", 0)
+        self._sync_geometry_visibility()
         return page
 
     def _create_binarization_page(self) -> QWidget:
@@ -627,6 +692,28 @@ class ParamPanel(QGroupBox):
             self.edge_high_label,
         ):
             widget.setVisible(is_canny)
+
+    def _sync_geometry_visibility(self) -> None:
+        mode = self.geometry_group.checkedButton().property("transform_type")
+        for name in ("geometry_width", "geometry_height", "geometry_keep_aspect", "geometry_interpolation"):
+            getattr(self, name).setVisible(mode == "resize")
+            if hasattr(self, name + "_label"):
+                getattr(self, name + "_label").setVisible(mode == "resize")
+        for name in ("geometry_x", "geometry_y", "geometry_crop_width", "geometry_crop_height"):
+            getattr(self, name).setVisible(mode == "crop")
+            getattr(self, name + "_label").setVisible(mode == "crop")
+        for name in ("geometry_angle", "geometry_center_x", "geometry_center_y", "geometry_scale", "geometry_border_mode", "geometry_transform_interpolation"):
+            getattr(self, name).setVisible(mode == "rotate")
+            getattr(self, name + "_label").setVisible(mode == "rotate")
+        for index, widget in enumerate(self.geometry_points):
+            widget.setVisible(mode in ("affine", "perspective") and (mode == "perspective" or index < 6))
+            widget_label = self.geometry_points[index].property("geometry_label")
+            if widget_label is not None:
+                widget_label.setVisible(widget.isVisible())
+        self.geometry_output_width.setVisible(mode in ("affine", "perspective"))
+        self.geometry_output_height.setVisible(mode in ("affine", "perspective"))
+        self.geometry_output_width_label.setVisible(mode in ("affine", "perspective"))
+        self.geometry_output_height_label.setVisible(mode in ("affine", "perspective"))
 
     @staticmethod
     def _parameter_row(
@@ -904,8 +991,31 @@ class ParamPanel(QGroupBox):
         self._emit_frequency()
 
     def geometry_params(self) -> GeometryParams:
+        mode = self.geometry_group.checkedButton().property("transform_type")
+        points = [
+            (self.geometry_points[index].value(), self.geometry_points[index + 1].value())
+            for index in range(0, 16, 2)
+        ]
         return GeometryParams(
-            transform_type=self.geometry_group.checkedButton().property("transform_type")
+            transform_type=mode,
+            width=self.geometry_width.value(),
+            height=self.geometry_height.value(),
+            keep_aspect=self.geometry_keep_aspect.isChecked(),
+            interpolation=self.geometry_interpolation.currentData(),
+            x=self.geometry_x.value(),
+            y=self.geometry_y.value(),
+            crop_width=self.geometry_crop_width.value(),
+            crop_height=self.geometry_crop_height.value(),
+            angle=self.geometry_angle.value(),
+            center_x=self.geometry_center_x.value(),
+            center_y=self.geometry_center_y.value(),
+            scale=self.geometry_scale.value(),
+            border_mode=self.geometry_border_mode.currentData(),
+            rotation_interpolation=self.geometry_transform_interpolation.currentData(),
+            src_points=tuple(points[:4]),
+            dst_points=tuple(points[4:]),
+            output_width=self.geometry_output_width.value(),
+            output_height=self.geometry_output_height.value(),
         )
 
     def binarization_params(self) -> BinarizationParams:

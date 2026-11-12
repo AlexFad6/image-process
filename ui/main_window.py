@@ -106,7 +106,46 @@ class ProcessingWorker(QObject):
                 self.finished.emit(result, self.generation)
             elif self.operation == "geometry":
                 processor, image, params = self.payload
-                result = processor.geometric_transform(image, params.transform_type)
+                if params.transform_type not in {
+                    "rotate_cw_90", "rotate_ccw_90", "rotate_180",
+                    "flip_horizontal", "flip_vertical",
+                }:
+                    processor = LibraryImageProcessor
+                if params.transform_type in {
+                    "rotate_cw_90", "rotate_ccw_90", "rotate_180",
+                    "flip_horizontal", "flip_vertical",
+                }:
+                    result = processor.geometric_transform(image, params.transform_type)
+                elif params.transform_type == "resize":
+                    result = processor.resize_image(
+                        image, params.width, params.height, params.interpolation, params.keep_aspect
+                    )
+                elif params.transform_type == "crop":
+                    result = processor.crop_image(
+                        image, params.x, params.y, params.crop_width, params.crop_height
+                    )
+                elif params.transform_type == "rotate":
+                    result = processor.rotate_arbitrary(
+                        image, params.angle,
+                        None if params.center_x == 0 and params.center_y == 0
+                        else (params.center_x, params.center_y),
+                        params.scale, params.border_mode, params.border_value,
+                        params.rotation_interpolation,
+                    )
+                elif params.transform_type == "affine":
+                    result = processor.affine_transform(
+                        image, params.src_points[:3], params.dst_points[:3],
+                        (params.output_width, params.output_height)
+                        if params.output_width and params.output_height else None,
+                    )
+                elif params.transform_type == "perspective":
+                    result = processor.perspective_transform(
+                        image, params.src_points, params.dst_points,
+                        (params.output_width, params.output_height)
+                        if params.output_width and params.output_height else None,
+                    )
+                else:
+                    raise ValueError(f"Unsupported geometric transform: {params.transform_type}")
                 self.finished.emit(result, self.generation)
             elif self.operation == "binarization":
                 processor, image, params = self.payload
