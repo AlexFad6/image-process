@@ -19,25 +19,24 @@ from PySide6.QtWidgets import (
 )
 
 from core.app_state import AppState
+from core.composite_processor import CompositeImageProcessor
 from core.exporter import Exporter
-from core.image_processor_library import LibraryImageProcessor
-from core.image_processor_manual import ManualImageProcessor
 from .attribute_panel import AttributePanel
 from .image_panel import ImagePanel
 from .param_panel import ParamPanel
 from utils import install_language, resource_path
 
 
-def _apply_extended_frequency_filter(dft_shift, params):
+def _apply_extended_frequency_filter(dft_shift, params, processor):
     """Dispatch all frequency-domain modes through the core filter API."""
     mode = getattr(params, "mode", params.pass_type)
     if mode in ("lowpass", "highpass"):
-        return LibraryImageProcessor.apply_frequency_filter(
+        return processor.apply_frequency_filter(
             dft_shift, params.filter_type, params.cutoff, mode, params.order
         )
     if mode in ("bandpass", "bandstop", "bandreject"):
         pass_type = "bandreject" if mode in ("bandstop", "bandreject") else "bandpass"
-        return LibraryImageProcessor.apply_band_filter(
+        return processor.apply_band_filter(
             dft_shift,
             pass_type,
             params.filter_type,
@@ -47,7 +46,7 @@ def _apply_extended_frequency_filter(dft_shift, params):
         )
     if mode in ("notch", "notchreject", "notchpass"):
         pass_type = "notchreject" if mode in ("notch", "notchreject") else "notchpass"
-        return LibraryImageProcessor.apply_notch_filter(
+        return processor.apply_notch_filter(
             dft_shift,
             pass_type,
             params.filter_type,
@@ -106,11 +105,6 @@ class ProcessingWorker(QObject):
                 self.finished.emit(result, self.generation)
             elif self.operation == "geometry":
                 processor, image, params = self.payload
-                if params.transform_type not in {
-                    "rotate_cw_90", "rotate_ccw_90", "rotate_180",
-                    "flip_horizontal", "flip_vertical",
-                }:
-                    processor = LibraryImageProcessor
                 if params.transform_type in {
                     "rotate_cw_90", "rotate_ccw_90", "rotate_180",
                     "flip_horizontal", "flip_vertical",
@@ -165,7 +159,6 @@ class ProcessingWorker(QObject):
                 self.finished.emit(result, self.generation)
             elif self.operation == "hough":
                 processor, image, params = self.payload
-                processor = LibraryImageProcessor
                 if params.mode == "lines":
                     items = processor.hough_lines(
                         image, params.method, params.rho, params.theta,
@@ -211,7 +204,9 @@ class ProcessingWorker(QObject):
                 self.finished.emit(result, self.generation)
             elif self.operation == "frequency":
                 frequency_data, params, processor = self.payload
-                filtered = _apply_extended_frequency_filter(frequency_data, params)
+                filtered = _apply_extended_frequency_filter(
+                    frequency_data, params, processor
+                )
                 result = (
                     filtered,
                     processor.compute_fft_display_spectrum(filtered),
@@ -253,7 +248,7 @@ class MainWindow(QMainWindow):
         self.params = ParamPanel()
         self._pending_spatial = self.params.spatial_params()
         self._pending_frequency = self.params.frequency_params()
-        self.processor = LibraryImageProcessor
+        self.processor = CompositeImageProcessor(prefer="library")
         self.attributes = AttributePanel()
 
         self._create_menu_bar()
@@ -545,11 +540,11 @@ class MainWindow(QMainWindow):
         self.retranslateUi()
 
     def use_library_backend(self) -> None:
-        self.processor = LibraryImageProcessor
+        self.processor = CompositeImageProcessor(prefer="library")
         self.apply_params(self.params.params())
 
     def use_custom_backend(self) -> None:
-        self.processor = ManualImageProcessor
+        self.processor = CompositeImageProcessor(prefer="manual")
         self.apply_params(self.params.params())
 
     def set_transform_mode(self, mode: str) -> None:
@@ -628,14 +623,14 @@ class MainWindow(QMainWindow):
         self.state.result = None
         self.state.clear_frequency_data()
         if self.state.gray_source is not None and self.state.gray_source.ndim == 2:
-            self.state.frequency_data = LibraryImageProcessor.compute_fft(self.state.gray_source)
+            self.state.frequency_data = self.processor.compute_fft(self.state.gray_source)
             self.state.fft_spectrum_uint8 = (
-                LibraryImageProcessor.compute_fft_display_spectrum(
+                self.processor.compute_fft_display_spectrum(
                     self.state.frequency_data
                 )
             )
             self.state.phase_spectrum_uint8 = (
-                LibraryImageProcessor.compute_fft_phase_spectrum(
+                self.processor.compute_fft_phase_spectrum(
                     self.state.frequency_data
                 )
             )
@@ -684,23 +679,23 @@ class MainWindow(QMainWindow):
         if self.state.source is None or self.state.source.ndim != 2:
             return
         if self.state.frequency_data is None:
-            self.state.frequency_data = LibraryImageProcessor.compute_fft(self.state.source)
-            self.state.fft_spectrum_uint8 = LibraryImageProcessor.compute_fft_display_spectrum(
+            self.state.frequency_data = self.processor.compute_fft(self.state.source)
+            self.state.fft_spectrum_uint8 = self.processor.compute_fft_display_spectrum(
                 self.state.frequency_data
             )
-            self.state.phase_spectrum_uint8 = LibraryImageProcessor.compute_fft_phase_spectrum(
+            self.state.phase_spectrum_uint8 = self.processor.compute_fft_phase_spectrum(
                 self.state.frequency_data
             )
         if self.state.result is not None and self.state.result.ndim == 2:
             if self.state.result_frequency_data is None:
-                self.state.result_frequency_data = LibraryImageProcessor.compute_fft(self.state.result)
+                self.state.result_frequency_data = self.processor.compute_fft(self.state.result)
                 self.state.result_fft_spectrum_uint8 = (
-                    LibraryImageProcessor.compute_fft_display_spectrum(
+                    self.processor.compute_fft_display_spectrum(
                         self.state.result_frequency_data
                     )
                 )
                 self.state.result_phase_spectrum_uint8 = (
-                    LibraryImageProcessor.compute_fft_phase_spectrum(
+                    self.processor.compute_fft_phase_spectrum(
                         self.state.result_frequency_data
                     )
                 )
@@ -743,7 +738,7 @@ class MainWindow(QMainWindow):
             self.update_display_mode()
             self.params.set_frequency_controls_enabled(True)
             return
-        self._start_processing("fft", (self.state.source.copy(), LibraryImageProcessor))
+        self._start_processing("fft", (self.state.source.copy(), self.processor))
 
     def apply_frequency_filter(self, params=None) -> None:
         if self.state.frequency_data is None:
@@ -818,7 +813,7 @@ class MainWindow(QMainWindow):
             (
                 self.state.frequency_data.copy(),
                 self._pending_frequency,
-                LibraryImageProcessor,
+                self.processor,
             ),
         )
 
@@ -922,7 +917,7 @@ class MainWindow(QMainWindow):
             return
         self._start_processing(
             "ifft",
-            (self.state.frequency_data.copy(), LibraryImageProcessor, component),
+            (self.state.frequency_data.copy(), self.processor, component),
         )
 
     def _set_frequency_controls_enabled(self, enabled: bool) -> None:
