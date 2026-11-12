@@ -233,7 +233,7 @@ class ParamPanel(QGroupBox):
         self.noise_group = QButtonGroup(page)
         noise_options = QVBoxLayout()
         for text, value in (
-            ("高斯白噪声", "gaussian_noise"),
+            ("高斯噪声", "gaussian_noise"),
             ("椒盐噪声", "salt_pepper_noise"),
             ("泊松噪声", "poisson_noise"),
             ("斑点噪声", "speckle_noise"),
