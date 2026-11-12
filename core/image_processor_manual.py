@@ -208,6 +208,16 @@ class ManualImageProcessor:
         return np.ascontiguousarray(values)
 
     @staticmethod
+    def uniform_noise(
+        image: np.ndarray, low: float = -20.0, high: float = 20.0, seed: int = 0
+    ) -> np.ndarray:
+        if low > high:
+            raise ValueError("Uniform noise low bound must not exceed high bound")
+        values = np.asarray(image, dtype=np.float32)
+        noise = np.random.default_rng(seed).uniform(low, high, values.shape)
+        return np.ascontiguousarray(np.clip(values + noise, 0, 255).astype(np.uint8))
+
+    @staticmethod
     def geometric_transform(image: np.ndarray, transform_type: str) -> np.ndarray:
         """Rotate or flip an image using NumPy operations."""
         if transform_type == "rotate_cw_90":

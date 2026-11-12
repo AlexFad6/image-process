@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
+from skimage.util import random_noise
 
 MAX_FREQUENCY_ORDER = 32
 MAX_NOTCHES = 128
@@ -202,22 +203,56 @@ class LibraryImageProcessor:
     def gaussian_noise(
         image: np.ndarray, mean: float, std: float, seed: int = 0
     ) -> np.ndarray:
-        values = np.asarray(image, dtype=np.float32)
-        noise = np.random.default_rng(seed).normal(mean, std, values.shape)
-        return np.ascontiguousarray(np.clip(values + noise, 0, 255).astype(np.uint8))
+        values = np.asarray(image, dtype=np.float32) / 255.0
+        noisy = random_noise(
+            values,
+            mode="gaussian",
+            mean=float(mean) / 255.0,
+            var=(float(std) / 255.0) ** 2,
+            clip=True,
+            rng=np.random.default_rng(seed),
+        )
+        return np.ascontiguousarray(np.clip(noisy * 255.0, 0, 255).astype(np.uint8))
 
     @staticmethod
     def salt_pepper_noise(
         image: np.ndarray, amount: float, seed: int = 0
     ) -> np.ndarray:
-        values = np.asarray(image, dtype=np.uint8).copy()
-        probability = np.clip(amount, 0, 100) / 100.0
-        rng = np.random.default_rng(seed)
-        mask = rng.random(values.shape) < probability
-        salt = rng.random(values.shape) < 0.5
-        values[mask & salt] = 255
-        values[mask & ~salt] = 0
-        return np.ascontiguousarray(values)
+        values = np.asarray(image, dtype=np.float32) / 255.0
+        noisy = random_noise(
+            values,
+            mode="s&p",
+            amount=float(np.clip(amount, 0, 100)) / 100.0,
+            clip=True,
+            rng=np.random.default_rng(seed),
+        )
+        return np.ascontiguousarray(np.clip(noisy * 255.0, 0, 255).astype(np.uint8))
+
+    @staticmethod
+    def poisson_noise(image: np.ndarray, seed: int = 0) -> np.ndarray:
+        values = np.asarray(image, dtype=np.float32) / 255.0
+        noisy = random_noise(
+            values,
+            mode="poisson",
+            clip=True,
+            rng=np.random.default_rng(seed),
+        )
+        return np.ascontiguousarray(np.clip(noisy * 255.0, 0, 255).astype(np.uint8))
+
+    @staticmethod
+    def speckle_noise(
+        image: np.ndarray, mean: float = 0.0, std: float = 0.1, seed: int = 0
+    ) -> np.ndarray:
+        values = np.asarray(image, dtype=np.float32) / 255.0
+        noisy = random_noise(
+            values,
+            mode="speckle",
+            mean=float(mean),
+            var=float(std) ** 2,
+            clip=True,
+            rng=np.random.default_rng(seed),
+        )
+        return np.ascontiguousarray(np.clip(noisy * 255.0, 0, 255).astype(np.uint8))
 
     @staticmethod
     def geometric_transform(image: np.ndarray, transform_type: str) -> np.ndarray:
