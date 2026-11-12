@@ -105,6 +105,16 @@ class ProcessingWorker(QObject):
                     result = processor.salt_pepper_noise(
                         image, params.salt_pepper_amount, params.seed
                     )
+                elif params.filter_type == "poisson_noise":
+                    result = processor.poisson_noise(image, params.seed)
+                elif params.filter_type == "speckle_noise":
+                    result = processor.speckle_noise(
+                        image, params.speckle_mean, params.speckle_std, params.seed
+                    )
+                elif params.filter_type == "uniform_noise":
+                    result = processor.uniform_noise(
+                        image, params.uniform_low, params.uniform_high, params.seed
+                    )
                 else:
                     raise ValueError(f"Unsupported noise type: {params.filter_type}")
                 self.finished.emit(result, self.generation)

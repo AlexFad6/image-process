@@ -235,6 +235,9 @@ class ParamPanel(QGroupBox):
         for text, value in (
             ("高斯白噪声", "gaussian_noise"),
             ("椒盐噪声", "salt_pepper_noise"),
+            ("泊松噪声", "poisson_noise"),
+            ("斑点噪声", "speckle_noise"),
+            ("均匀噪声", "uniform_noise"),
         ):
             button = QRadioButton(text, page)
             button.setProperty("filter_type", value)
@@ -258,6 +261,24 @@ class ParamPanel(QGroupBox):
         self.salt_pepper_amount.setValue(5)
         self.salt_pepper_amount.setSuffix("%")
         self.salt_pepper_amount.valueChanged.connect(self._emit_noise)
+        self.speckle_mean = QDoubleSpinBox(page)
+        self.speckle_mean.setRange(-1, 1)
+        self.speckle_mean.setDecimals(3)
+        self.speckle_mean.setValue(0)
+        self.speckle_mean.valueChanged.connect(self._emit_noise)
+        self.speckle_std = QDoubleSpinBox(page)
+        self.speckle_std.setRange(0, 1)
+        self.speckle_std.setDecimals(3)
+        self.speckle_std.setValue(0.1)
+        self.speckle_std.valueChanged.connect(self._emit_noise)
+        self.uniform_low = QDoubleSpinBox(page)
+        self.uniform_low.setRange(-255, 255)
+        self.uniform_low.setValue(-20)
+        self.uniform_low.valueChanged.connect(self._emit_noise)
+        self.uniform_high = QDoubleSpinBox(page)
+        self.uniform_high.setRange(-255, 255)
+        self.uniform_high.setValue(20)
+        self.uniform_high.valueChanged.connect(self._emit_noise)
         self.seed = QSpinBox(page)
         self.seed.setRange(0, 2147483647)
         self.seed.setValue(0)
@@ -282,6 +303,30 @@ class ParamPanel(QGroupBox):
         salt_pepper_layout.addWidget(self.salt_pepper_amount)
         form.addRow(self.tr("噪声比例"), self.salt_pepper_amount_row)
         self.salt_pepper_amount_label = form.labelForField(self.salt_pepper_amount_row)
+        self.speckle_mean_row = QWidget(page)
+        speckle_mean_layout = QHBoxLayout(self.speckle_mean_row)
+        speckle_mean_layout.setContentsMargins(0, 0, 0, 0)
+        speckle_mean_layout.addWidget(self.speckle_mean)
+        form.addRow(self.tr("斑点均值"), self.speckle_mean_row)
+        self.speckle_mean_label = form.labelForField(self.speckle_mean_row)
+        self.speckle_std_row = QWidget(page)
+        speckle_std_layout = QHBoxLayout(self.speckle_std_row)
+        speckle_std_layout.setContentsMargins(0, 0, 0, 0)
+        speckle_std_layout.addWidget(self.speckle_std)
+        form.addRow(self.tr("斑点标准差"), self.speckle_std_row)
+        self.speckle_std_label = form.labelForField(self.speckle_std_row)
+        self.uniform_low_row = QWidget(page)
+        uniform_low_layout = QHBoxLayout(self.uniform_low_row)
+        uniform_low_layout.setContentsMargins(0, 0, 0, 0)
+        uniform_low_layout.addWidget(self.uniform_low)
+        form.addRow(self.tr("均匀噪声下限"), self.uniform_low_row)
+        self.uniform_low_label = form.labelForField(self.uniform_low_row)
+        self.uniform_high_row = QWidget(page)
+        uniform_high_layout = QHBoxLayout(self.uniform_high_row)
+        uniform_high_layout.setContentsMargins(0, 0, 0, 0)
+        uniform_high_layout.addWidget(self.uniform_high)
+        form.addRow(self.tr("均匀噪声上限"), self.uniform_high_row)
+        self.uniform_high_label = form.labelForField(self.uniform_high_row)
         self._sync_noise_visibility()
         return page
 
@@ -854,6 +899,14 @@ class ParamPanel(QGroupBox):
         self.gaussian_mean_row.setVisible(filter_type == "gaussian_noise")
         self.gaussian_std_row.setVisible(filter_type == "gaussian_noise")
         self.salt_pepper_amount_row.setVisible(filter_type == "salt_pepper_noise")
+        self.speckle_mean_row.setVisible(filter_type == "speckle_noise")
+        self.speckle_std_row.setVisible(filter_type == "speckle_noise")
+        self.uniform_low_row.setVisible(filter_type == "uniform_noise")
+        self.uniform_high_row.setVisible(filter_type == "uniform_noise")
+        self.speckle_mean_label.setVisible(filter_type == "speckle_noise")
+        self.speckle_std_label.setVisible(filter_type == "speckle_noise")
+        self.uniform_low_label.setVisible(filter_type == "uniform_noise")
+        self.uniform_high_label.setVisible(filter_type == "uniform_noise")
 
     def _set_frequency_controls_enabled(self, enabled: bool) -> None:
         for button in self.frequency_filter_group.buttons():
@@ -904,6 +957,10 @@ class ParamPanel(QGroupBox):
             self.gaussian_mean.setValue(0)
             self.gaussian_std.setValue(20)
             self.salt_pepper_amount.setValue(5)
+            self.speckle_mean.setValue(0)
+            self.speckle_std.setValue(0.1)
+            self.uniform_low.setValue(-20)
+            self.uniform_high.setValue(20)
             self.seed.setValue(0)
             self._sync_noise_visibility()
             self._emit_noise()
@@ -984,6 +1041,10 @@ class ParamPanel(QGroupBox):
             gaussian_std=20,
             salt_pepper_amount=5,
             seed=0,
+            speckle_mean=0,
+            speckle_std=0.1,
+            uniform_low=-20,
+            uniform_high=20,
         )
 
     def noise_params(self) -> SpatialParams:
@@ -998,6 +1059,10 @@ class ParamPanel(QGroupBox):
             gaussian_std=self.gaussian_std.value(),
             salt_pepper_amount=self.salt_pepper_amount.value(),
             seed=self.seed.value(),
+            speckle_mean=self.speckle_mean.value(),
+            speckle_std=self.speckle_std.value(),
+            uniform_low=self.uniform_low.value(),
+            uniform_high=self.uniform_high.value(),
         )
 
     def frequency_params(self) -> FrequencyParams:

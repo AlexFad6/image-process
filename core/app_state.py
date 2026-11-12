@@ -28,6 +28,10 @@ class SpatialParams:
     gaussian_std: float = 20.0
     salt_pepper_amount: float = 5.0
     seed: int = 0
+    speckle_mean: float = 0.0
+    speckle_std: float = 0.1
+    uniform_low: float = -20.0
+    uniform_high: float = 20.0
 
 
 @dataclass
