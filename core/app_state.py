@@ -32,6 +32,10 @@ class SpatialParams:
     speckle_std: float = 0.1
     uniform_low: float = -20.0
     uniform_high: float = 20.0
+    periodic_angle: float = 0.0
+    periodic_freq: float = 0.05
+    periodic_amplitude: float = 20.0
+    periodic_phase: float = 0.0
 
 
 @dataclass

@@ -115,6 +115,14 @@ class ProcessingWorker(QObject):
                     result = processor.uniform_noise(
                         image, params.uniform_low, params.uniform_high, params.seed
                     )
+                elif params.filter_type == "periodic_noise":
+                    result = processor.periodic_noise(
+                        image,
+                        params.periodic_angle,
+                        params.periodic_freq,
+                        params.periodic_amplitude,
+                        params.periodic_phase,
+                    )
                 else:
                     raise ValueError(f"Unsupported noise type: {params.filter_type}")
                 self.finished.emit(result, self.generation)
@@ -333,6 +341,8 @@ class MainWindow(QMainWindow):
 
         self.images.convertToGrayRequested.connect(self.convert_to_gray)
         self.images.displayModeRequested.connect(self.schedule_display_mode_switch)
+        self.images.previousRequested.connect(self.previous_image)
+        self.images.nextRequested.connect(self.next_image)
         self.params.changed.connect(self.apply_params)
         self.params.noiseChanged.connect(self.apply_noise_params)
         self.params.spatialChanged.connect(self.apply_spatial_params)
@@ -663,6 +673,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"{self.queue_index + 1}/{len(self.image_queue)}  {path}")
         self.display_mode = "original"
         self.images.convert_gray.setText(self.tr("灰度图"))
+        self._update_navigation_buttons()
 
     def cycle_display_mode(self) -> None:
         if self.state.source is None:
@@ -936,6 +947,7 @@ class MainWindow(QMainWindow):
         self.images.original.restore_view_state(original_state)
         self.images.result.restore_view_state(result_state)
         self.images.sync_views()
+        self._update_navigation_buttons()
 
     def _processing_failed(self, message: str, generation: int) -> None:
         if generation == self._processing_generation:
@@ -958,9 +970,25 @@ class MainWindow(QMainWindow):
             self._show_queue_image()
 
     def next_image(self) -> None:
+        if self.state.result is not None and self.image_queue:
+            result_path = f"{self.state.source_path} (处理结果)"
+            self.image_queue.append((self.state.result.copy(), result_path))
+            self.queue_index += 1
+            self._show_queue_image()
+            return
         if self.queue_index + 1 < len(self.image_queue):
             self.queue_index += 1
             self._show_queue_image()
+
+    def _update_navigation_buttons(self) -> None:
+        has_previous = self.queue_index > 0
+        has_next = self.queue_index + 1 < len(self.image_queue)
+        can_store_result = (
+            self.queue_index == len(self.image_queue) - 1
+            and self.state.result is not None
+        )
+        self.images.previous_button.setEnabled(has_previous)
+        self.images.next_button.setEnabled(has_next or can_store_result)
 
     def apply_params(self, params) -> None:
         if self.state.source is None:
@@ -987,6 +1015,7 @@ class MainWindow(QMainWindow):
         self.images.original.restore_view_state(original_state)
         self.images.result.restore_view_state(result_state)
         self.images.sync_views()
+        self._update_navigation_buttons()
 
     def save_image(self) -> None:
         if self.state.result is None:

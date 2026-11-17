@@ -238,6 +238,7 @@ class ParamPanel(QGroupBox):
             ("泊松噪声", "poisson_noise"),
             ("斑点噪声", "speckle_noise"),
             ("均匀噪声", "uniform_noise"),
+            ("周期噪声", "periodic_noise"),
         ):
             button = QRadioButton(text, page)
             button.setProperty("filter_type", value)
@@ -279,6 +280,25 @@ class ParamPanel(QGroupBox):
         self.uniform_high.setRange(-255, 255)
         self.uniform_high.setValue(20)
         self.uniform_high.valueChanged.connect(self._emit_noise)
+        self.periodic_angle = QDoubleSpinBox(page)
+        self.periodic_angle.setRange(-6.283185, 6.283185)
+        self.periodic_angle.setDecimals(4)
+        self.periodic_angle.setValue(0)
+        self.periodic_angle.valueChanged.connect(self._emit_noise)
+        self.periodic_freq = QDoubleSpinBox(page)
+        self.periodic_freq.setRange(0, 10)
+        self.periodic_freq.setDecimals(4)
+        self.periodic_freq.setValue(0.05)
+        self.periodic_freq.valueChanged.connect(self._emit_noise)
+        self.periodic_amplitude = QDoubleSpinBox(page)
+        self.periodic_amplitude.setRange(0, 255)
+        self.periodic_amplitude.setValue(20)
+        self.periodic_amplitude.valueChanged.connect(self._emit_noise)
+        self.periodic_phase = QDoubleSpinBox(page)
+        self.periodic_phase.setRange(-6.283185, 6.283185)
+        self.periodic_phase.setDecimals(4)
+        self.periodic_phase.setValue(0)
+        self.periodic_phase.valueChanged.connect(self._emit_noise)
         self.seed = QSpinBox(page)
         self.seed.setRange(0, 2147483647)
         self.seed.setValue(0)
@@ -334,6 +354,30 @@ class ParamPanel(QGroupBox):
         uniform_high_layout.addWidget(self.uniform_high)
         form.addRow(self.tr("均匀噪声上限"), self.uniform_high_row)
         self.uniform_high_label = form.labelForField(self.uniform_high_row)
+        self.periodic_angle_row = QWidget(page)
+        periodic_angle_layout = QHBoxLayout(self.periodic_angle_row)
+        periodic_angle_layout.setContentsMargins(0, 0, 0, 0)
+        periodic_angle_layout.addWidget(self.periodic_angle)
+        form.addRow(self.tr("周期角度"), self.periodic_angle_row)
+        self.periodic_angle_label = form.labelForField(self.periodic_angle_row)
+        self.periodic_freq_row = QWidget(page)
+        periodic_freq_layout = QHBoxLayout(self.periodic_freq_row)
+        periodic_freq_layout.setContentsMargins(0, 0, 0, 0)
+        periodic_freq_layout.addWidget(self.periodic_freq)
+        form.addRow(self.tr("周期频率"), self.periodic_freq_row)
+        self.periodic_freq_label = form.labelForField(self.periodic_freq_row)
+        self.periodic_amplitude_row = QWidget(page)
+        periodic_amplitude_layout = QHBoxLayout(self.periodic_amplitude_row)
+        periodic_amplitude_layout.setContentsMargins(0, 0, 0, 0)
+        periodic_amplitude_layout.addWidget(self.periodic_amplitude)
+        form.addRow(self.tr("周期强度"), self.periodic_amplitude_row)
+        self.periodic_amplitude_label = form.labelForField(self.periodic_amplitude_row)
+        self.periodic_phase_row = QWidget(page)
+        periodic_phase_layout = QHBoxLayout(self.periodic_phase_row)
+        periodic_phase_layout.setContentsMargins(0, 0, 0, 0)
+        periodic_phase_layout.addWidget(self.periodic_phase)
+        form.addRow(self.tr("周期相位"), self.periodic_phase_row)
+        self.periodic_phase_label = form.labelForField(self.periodic_phase_row)
         self._sync_noise_visibility()
         return page
 
@@ -914,6 +958,15 @@ class ParamPanel(QGroupBox):
         self.speckle_std_label.setVisible(filter_type == "speckle_noise")
         self.uniform_low_label.setVisible(filter_type == "uniform_noise")
         self.uniform_high_label.setVisible(filter_type == "uniform_noise")
+        periodic_visible = filter_type == "periodic_noise"
+        for name in (
+            "periodic_angle",
+            "periodic_freq",
+            "periodic_amplitude",
+            "periodic_phase",
+        ):
+            getattr(self, name + "_row").setVisible(periodic_visible)
+            getattr(self, name + "_label").setVisible(periodic_visible)
 
     def _set_frequency_controls_enabled(self, enabled: bool) -> None:
         for button in self.frequency_filter_group.buttons():
@@ -968,6 +1021,10 @@ class ParamPanel(QGroupBox):
             self.speckle_std.setValue(0.1)
             self.uniform_low.setValue(-20)
             self.uniform_high.setValue(20)
+            self.periodic_angle.setValue(0)
+            self.periodic_freq.setValue(0.05)
+            self.periodic_amplitude.setValue(20)
+            self.periodic_phase.setValue(0)
             self.seed.setValue(0)
             self._sync_noise_visibility()
             self._emit_noise()
@@ -1052,6 +1109,10 @@ class ParamPanel(QGroupBox):
             speckle_std=0.1,
             uniform_low=-20,
             uniform_high=20,
+            periodic_angle=0,
+            periodic_freq=0.05,
+            periodic_amplitude=20,
+            periodic_phase=0,
         )
 
     def noise_params(self) -> SpatialParams:
@@ -1070,6 +1131,10 @@ class ParamPanel(QGroupBox):
             speckle_std=self.speckle_std.value(),
             uniform_low=self.uniform_low.value(),
             uniform_high=self.uniform_high.value(),
+            periodic_angle=self.periodic_angle.value(),
+            periodic_freq=self.periodic_freq.value(),
+            periodic_amplitude=self.periodic_amplitude.value(),
+            periodic_phase=self.periodic_phase.value(),
         )
 
     def frequency_params(self) -> FrequencyParams:

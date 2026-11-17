@@ -16,6 +16,8 @@ from .image_view import ImageView
 class ImagePanel(QGroupBox):
     convertToGrayRequested = Signal()
     displayModeRequested = Signal()
+    previousRequested = Signal()
+    nextRequested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -25,6 +27,13 @@ class ImagePanel(QGroupBox):
         top_bar = QWidget()
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.addStretch()
+        self.previous_button = QPushButton()
+        self.previous_button.clicked.connect(self.previousRequested.emit)
+        top_layout.addWidget(self.previous_button)
+        self.next_button = QPushButton()
+        self.next_button.clicked.connect(self.nextRequested.emit)
+        top_layout.addWidget(self.next_button)
         top_layout.addStretch()
         self.convert_gray = QPushButton()
         self.convert_gray.clicked.connect(self.displayModeRequested.emit)
@@ -49,6 +58,10 @@ class ImagePanel(QGroupBox):
         self.setTitle(self.tr("图像对比"))
         self.convert_gray.setText(self.tr("灰度图"))
         self.convert_gray.setToolTip(self.tr("切换灰度图、频谱图和相位谱图"))
+        self.previous_button.setText("←")
+        self.previous_button.setToolTip(self.tr("上一张图像"))
+        self.next_button.setText("→")
+        self.next_button.setToolTip(self.tr("下一张图像"))
 
     def set_sync_zoom(self, enabled: bool) -> None:
         self.sync_zoom = enabled

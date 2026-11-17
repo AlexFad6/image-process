@@ -218,6 +218,35 @@ class ManualImageProcessor:
         return np.ascontiguousarray(np.clip(values + noise, 0, 255).astype(np.uint8))
 
     @staticmethod
+    def periodic_noise(
+        image: np.ndarray,
+        angle: float = 0.0,
+        freq: float = 0.05,
+        amplitude: float = 20.0,
+        phase: float = 0.0,
+    ) -> np.ndarray:
+        """Add a two-dimensional sinusoidal stripe pattern to an image.
+
+        ``angle`` and ``phase`` are in radians, while ``freq`` is measured in
+        cycles per pixel. The angle controls the stripe direction.
+        """
+        if freq < 0:
+            raise ValueError("Periodic noise frequency must not be negative")
+        if amplitude < 0:
+            raise ValueError("Periodic noise amplitude must not be negative")
+
+        values = np.asarray(image, dtype=np.float32)
+        height, width = values.shape[:2]
+        y, x = np.indices((height, width), dtype=np.float32)
+        projected = x * np.cos(angle) + y * np.sin(angle)
+        pattern = amplitude * np.sin(2.0 * np.pi * freq * projected + phase)
+        if values.ndim == 3:
+            pattern = pattern[..., np.newaxis]
+        return np.ascontiguousarray(
+            np.clip(values + pattern, 0, 255).astype(np.uint8)
+        )
+
+    @staticmethod
     def geometric_transform(image: np.ndarray, transform_type: str) -> np.ndarray:
         """Rotate or flip an image using NumPy operations."""
         if transform_type == "rotate_cw_90":
