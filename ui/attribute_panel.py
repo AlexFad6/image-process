@@ -65,7 +65,7 @@ class AttributePanel(QGroupBox):
             axes.clear()
 
             axes.set_ylim(0, 0.05)
-            axes.set_xlim(0, 256)
+            axes.set_xlim(-0.5, 255.5)
             axes.spines["top"].set_visible(False)
             axes.spines["right"].set_visible(False)
             axes.spines["left"].set_visible(False)
@@ -79,13 +79,18 @@ class AttributePanel(QGroupBox):
                 plot.draw_idle()
                 continue
 
-            hist, _, _ = axes.hist(
+            hist, _ = np.histogram(
                 image.ravel(),
-                bins=256,
-                range=(0, 256),
+                bins=np.arange(257) - 0.5,
                 density=True,
+            )
+            axes.bar(
+                np.arange(256),
+                hist,
+                width=1.0,
                 color="steelblue",
             )
+
         for axes, plot in (
             (self.axes_1, self.plot_1),
             (self.axes_2, self.plot_2),
