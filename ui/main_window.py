@@ -1018,10 +1018,18 @@ class MainWindow(QMainWindow):
         self._update_navigation_buttons()
 
     def save_image(self) -> None:
-        if self.state.result is None:
+        if self.display_mode == "phase":
+            image = self.state.result_phase_spectrum_uint8
+        elif self.display_mode == "spectrum":
+            image = self.state.result_fft_spectrum_uint8
+        else:
+            image = self.state.result
+
+        if image is None:
             return
+
         path, _ = QFileDialog.getSaveFileName(self, "保存图片", "", "PNG (*.png);;JPEG (*.jpg)")
-        if path and not Exporter.save_image(path, self.state.result):
+        if path and not Exporter.save_image(path, image):
             QMessageBox.warning(self, self.tr("错误"), self.tr("保存失败"))
 
     def export_sequence(self) -> None:
