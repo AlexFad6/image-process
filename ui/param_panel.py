@@ -757,7 +757,7 @@ class ParamPanel(QGroupBox):
         self.reset.setText(self.tr("重置参数"))
         self.fft_button.setText(self.tr("傅里叶变换"))
         self.ifft_button.setText(self.tr("应用逆变换"))
-        self.magnitude_ifft_button.setText(self.tr("仅幅度谱恢复"))
+        self.magnitude_ifft_button.setText(self.tr("仅幅值谱恢复"))
         self.phase_ifft_button.setText(self.tr("仅相位谱恢复"))
 
     def _emit_geometry(self, *_args) -> None:
