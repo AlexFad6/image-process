@@ -141,6 +141,100 @@ class ManualImageProcessor:
         return np.ascontiguousarray(result)
 
     @staticmethod
+    def geometric_mean_filter(image: np.ndarray, size: int) -> np.ndarray:
+        """使用几何平均值执行几何均值滤波。"""
+        """Apply geometric mean filtering."""
+
+        values = np.asarray(image, dtype=np.uint8)
+        if size % 2 == 0 or size < 1:
+            raise ValueError("Filter size must be a positive odd number")
+
+        def filter_channel(channel: np.ndarray) -> np.ndarray:
+            radius = size // 2
+            padded = np.pad(channel, radius, mode="edge")
+            windows = np.lib.stride_tricks.sliding_window_view(
+                padded, (size, size)
+            )
+            flattened = windows.reshape(channel.shape[0], channel.shape[1], size * size)
+            # Clip zeros to one before taking logs so dark pixels remain valid.
+            result = np.exp(
+                np.mean(np.log(np.maximum(flattened, 1)), axis=-1)
+            )
+            return np.clip(result, 0, 255).astype(np.uint8)
+
+        if values.ndim == 2:
+            return np.ascontiguousarray(filter_channel(values))
+        if values.ndim == 3:
+            channels = [
+                filter_channel(values[..., channel])
+                for channel in range(values.shape[-1])
+            ]
+            return np.ascontiguousarray(np.stack(channels, axis=-1))
+        raise ValueError("Image must be a 2D grayscale or 3D multi-channel array")
+
+    @staticmethod
+    def adaptive_median_filter(image: np.ndarray, max_size: int) -> np.ndarray:
+        """使用逐级扩大的窗口执行自适应中值滤波。"""
+        """Apply adaptive median filtering with progressively larger windows."""
+
+        values = np.asarray(image, dtype=np.uint8)
+        if max_size % 2 == 0 or max_size < 3:
+            raise ValueError("Maximum filter size must be an odd number of at least 3")
+
+        def filter_channel(channel: np.ndarray) -> np.ndarray:
+            height, width = channel.shape
+            max_radius = max_size // 2
+            padded = np.pad(channel, max_radius, mode="edge")
+            result = np.empty_like(channel)
+            unresolved = np.ones((height, width), dtype=bool)
+
+            for size in range(3, max_size + 1, 2):
+                radius = size // 2
+                y_start = max_radius - radius
+                x_start = max_radius - radius
+                window_area = padded[
+                    y_start : y_start + height + size - 1,
+                    x_start : x_start + width + size - 1,
+                ]
+                windows = np.lib.stride_tricks.sliding_window_view(
+                    window_area, (size, size)
+                )
+                flattened = windows.reshape(height, width, size * size)
+                z_min = flattened.min(axis=-1)
+                z_max = flattened.max(axis=-1)
+                z_median = np.median(flattened, axis=-1).astype(np.uint8)
+                stage_a = (z_median > z_min) & (z_median < z_max)
+
+                if size == max_size:
+                    result[unresolved] = np.where(
+                        (channel > z_min) & (channel < z_max),
+                        channel,
+                        z_median,
+                    )[unresolved]
+                    unresolved &= ~stage_a
+                    break
+
+                resolved = unresolved & stage_a
+                result[resolved] = np.where(
+                    (channel > z_min) & (channel < z_max),
+                    channel,
+                    z_median,
+                )[resolved]
+                unresolved &= ~stage_a
+
+            return result
+
+        if values.ndim == 2:
+            return np.ascontiguousarray(filter_channel(values))
+        if values.ndim == 3:
+            channels = [
+                filter_channel(values[..., channel])
+                for channel in range(values.shape[-1])
+            ]
+            return np.ascontiguousarray(np.stack(channels, axis=-1))
+        raise ValueError("Image must be a 2D grayscale or 3D multi-channel array")
+
+    @staticmethod
     def bilateral_filter(
         image: np.ndarray, size: int, sigma_color: float, sigma_space: float
     ) -> np.ndarray:

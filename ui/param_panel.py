@@ -151,7 +151,8 @@ class ParamPanel(QGroupBox):
         self.spatial_filter_group = QButtonGroup(page)
         spatial_filters = QVBoxLayout()
         for text, value in (
-            ("均值滤波", "mean"),
+            ("算数均值滤波", "mean"),
+            ("几何均值滤波", "geometric_mean"),
             ("高斯滤波", "gaussian"),
             ("双边滤波", "bilateral"),
             ("拉普拉斯", "laplacian"),
@@ -161,6 +162,7 @@ class ParamPanel(QGroupBox):
             ("Sobel X", "sobel_x"),
             ("Sobel Y", "sobel_y"),
             ("中值滤波", "median"),
+            ("自适应中值滤波", "adaptive_median"),
             ("USM 锐化", "usm"),
         ):
             button = QRadioButton(text, page)
@@ -930,9 +932,22 @@ class ParamPanel(QGroupBox):
     def _sync_spatial_visibility(self) -> None:
         selected = self.spatial_filter_group.checkedButton()
         filter_type = selected.property("filter_type") if selected is not None else None
-        show_kernel_size = filter_type in ("mean", "gaussian", "bilateral", "median", "usm")
+        show_kernel_size = filter_type in (
+            "mean",
+            "geometric_mean",
+            "gaussian",
+            "bilateral",
+            "median",
+            "adaptive_median",
+            "usm",
+        )
         self.kernel_size.setVisible(show_kernel_size)
         self.kernel_size_label.setVisible(show_kernel_size)
+        self.kernel_size_label.setText(
+            self.tr("最大核大小")
+            if filter_type == "adaptive_median"
+            else self.tr("核大小")
+        )
         self.median_ratio_row.setVisible(filter_type == "median")
         self.median_ratio_label.setVisible(filter_type == "median")
         self.bilateral_sigma_color_row.setVisible(filter_type == "bilateral")

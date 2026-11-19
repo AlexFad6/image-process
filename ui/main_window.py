@@ -75,6 +75,14 @@ class ProcessingWorker(QObject):
                     result = processor.median_filter(
                         image, params.kernel_size, params.median_ratio
                     )
+                elif params.filter_type == "geometric_mean":
+                    result = processor.geometric_mean_filter(
+                        image, params.kernel_size
+                    )
+                elif params.filter_type == "adaptive_median":
+                    result = processor.adaptive_median_filter(
+                        image, params.kernel_size
+                    )
                 elif params.filter_type == "bilateral":
                     result = processor.bilateral_filter(
                         image,

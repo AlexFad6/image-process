@@ -177,6 +177,20 @@ class LibraryImageProcessor:
         return np.ascontiguousarray(result)
 
     @staticmethod
+    def geometric_mean_filter(image: np.ndarray, size: int) -> np.ndarray:
+        """Apply geometric mean filtering."""
+        from .image_processor_manual import ManualImageProcessor
+
+        return ManualImageProcessor.geometric_mean_filter(image, size)
+
+    @staticmethod
+    def adaptive_median_filter(image: np.ndarray, max_size: int) -> np.ndarray:
+        """Apply adaptive median filtering with progressively larger windows."""
+        from .image_processor_manual import ManualImageProcessor
+
+        return ManualImageProcessor.adaptive_median_filter(image, max_size)
+
+    @staticmethod
     def bilateral_filter(
         image: np.ndarray, size: int, sigma_color: float, sigma_space: float
     ) -> np.ndarray:
