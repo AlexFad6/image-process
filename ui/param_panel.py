@@ -443,7 +443,7 @@ class ParamPanel(QGroupBox):
         self.frequency_order_label = form.labelForField(self.frequency_order)
         self.frequency_band_width_label = form.labelForField(self.frequency_band_width)
         self.frequency_notch_radius = QDoubleSpinBox(page)
-        self.frequency_notch_radius.setRange(1, 1000)
+        self.frequency_notch_radius.setRange(0, 1000)
         self.frequency_notch_radius.setValue(8)
         form.addRow(self.tr("陷波半径"), self.frequency_notch_radius)
         self.frequency_notch_radius_label = form.labelForField(self.frequency_notch_radius)
@@ -1190,13 +1190,24 @@ class ParamPanel(QGroupBox):
         self.add_notch_point(point)
 
     def add_notch_point(self, point: tuple[float, float]) -> None:
-        point = (float(point[0]), float(point[1]))
-        if point not in [item.data(Qt.ItemDataRole.UserRole) for item in
-                         (self.frequency_notch_list.item(i)
-                          for i in range(self.frequency_notch_list.count()))]:
+        point = (
+            float(point[0]),
+            float(point[1]),
+            float(self.frequency_notch_radius.value()),
+        )
+        existing_points = [
+            item.data(Qt.ItemDataRole.UserRole)
+            for item in (
+                self.frequency_notch_list.item(i)
+                for i in range(self.frequency_notch_list.count())
+            )
+        ]
+        if not any(existing[:2] == point[:2] for existing in existing_points):
             if self.frequency_notch_list.count() >= 128:
                 return
-            item = QListWidgetItem(f"({point[0]}, {point[1]})")
+            item = QListWidgetItem(
+                f"({point[0]}, {point[1]}), r={point[2]}"
+            )
             item.setData(Qt.ItemDataRole.UserRole, point)
             self.frequency_notch_list.addItem(item)
             self._emit_frequency()

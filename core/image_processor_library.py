@@ -669,8 +669,8 @@ class LibraryImageProcessor:
             raise ValueError("pass_type must be 'notchpass' or 'notchstop'")
         if filter_type not in ("ideal", "butterworth", "gaussian"):
             raise ValueError(f"Unsupported frequency filter type: {filter_type}")
-        if not np.isfinite(radius) or radius <= 0:
-            raise ValueError("radius must be finite and greater than zero")
+        if not np.isfinite(radius) or radius < 0:
+            raise ValueError("radius must be finite and non-negative")
         if filter_type == "butterworth":
             _validate_order(order)
         try:
@@ -685,8 +685,8 @@ class LibraryImageProcessor:
         max_x, max_y = width / 2.0, height / 2.0
         points = set()
         for point in coordinates:
-            if not isinstance(point, (tuple, list, np.ndarray)) or len(point) != 2:
-                raise ValueError("Each notch must be an (x, y) coordinate")
+            if not isinstance(point, (tuple, list, np.ndarray)) or len(point) not in (2, 3):
+                raise ValueError("Each notch must be an (x, y) or (x, y, radius) value")
             try:
                 px, py = float(point[0]), float(point[1])
             except (TypeError, ValueError) as exc:
@@ -695,23 +695,29 @@ class LibraryImageProcessor:
                 raise ValueError("Notch coordinates must be finite")
             if abs(px) > max_x or abs(py) > max_y:
                 raise ValueError("Notch coordinate is outside the spectrum")
-            points.add((px, py))
-            points.add((-px, -py))
+            point_radius = radius if len(point) == 2 else float(point[2])
+            if not np.isfinite(point_radius) or point_radius < 0:
+                raise ValueError("Notch radius must be finite and non-negative")
+            points.add((px, py, point_radius))
+            points.add((-px, -py, point_radius))
         if len(points) > MAX_NOTCHES:
             raise ValueError(f"At most {MAX_NOTCHES} symmetric notch coordinates are allowed")
 
         y, x = np.ogrid[:height, :width]
         transfer = np.ones((height, width), dtype=np.float32)
-        for px, py in points:
+        for px, py, point_radius in points:
             distance = np.hypot(x - (width / 2.0 + px), y - (height / 2.0 + py))
-            if filter_type == "ideal":
-                factor = (distance > radius).astype(np.float32)
+            if point_radius == 0:
+                # A zero-radius notch targets exactly the frequency pixel.
+                factor = (distance != 0).astype(np.float32)
+            elif filter_type == "ideal":
+                factor = (distance > point_radius).astype(np.float32)
             elif filter_type == "gaussian":
-                factor = (1.0 - np.exp(-(distance ** 2) / (2.0 * radius ** 2))).astype(np.float32)
+                factor = (1.0 - np.exp(-(distance ** 2) / (2.0 * point_radius ** 2))).astype(np.float32)
             else:
                 order_value = _validate_order(order)
                 with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-                    factor = 1.0 / (1.0 + np.power(radius / distance, 2 * order_value))
+                    factor = 1.0 / (1.0 + np.power(point_radius / distance, 2 * order_value))
                 factor = np.nan_to_num(factor, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
             transfer *= factor
         if normalized_pass == "notchpass":

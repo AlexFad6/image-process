@@ -158,6 +158,8 @@ class ImageView(SyncGraphicsView):
         super().__init__(parent)
         self._pixmap_item = None
         self._image = None
+        self._click_position = None
+        self._dragged = False
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         self.setBackgroundBrush(QColor(30, 30, 30))
@@ -281,11 +283,32 @@ class ImageView(SyncGraphicsView):
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton and self._pixmap_item is not None:
-            point = self.mapToScene(event.position().toPoint())
-            rect = self._scene.sceneRect()
-            if rect.contains(point):
-                self.imageClicked.emit(point.x(), point.y())
+            self._click_position = event.position().toPoint()
+            self._dragged = False
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._click_position is not None and event.buttons() & Qt.LeftButton:
+            if (
+                event.position().toPoint() - self._click_position
+            ).manhattanLength() > 0:
+                self._dragged = True
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if (
+            event.button() == Qt.LeftButton
+            and self._click_position is not None
+            and not self._dragged
+            and self._pixmap_item is not None
+        ):
+            point = self.mapToScene(event.position().toPoint())
+            if self._scene.sceneRect().contains(point):
+                self.imageClicked.emit(point.x(), point.y())
+        if event.button() == Qt.LeftButton:
+            self._click_position = None
+            self._dragged = False
+        super().mouseReleaseEvent(event)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

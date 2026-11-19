@@ -47,7 +47,7 @@ class FrequencyParams:
     mode: str = "lowpass"
     band_width: float = 20.0
     notch_radius: float = 8.0
-    notch_points: list[tuple[float, float]] = field(default_factory=list)
+    notch_points: list[tuple[float, float, float]] = field(default_factory=list)
 
 
 @dataclass
