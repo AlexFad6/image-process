@@ -149,6 +149,8 @@ class ParamPanel(QGroupBox):
         page = QWidget(self)
         form = QFormLayout(page)
         self.spatial_filter_group = QButtonGroup(page)
+        self._spatial_kernel_sizes = {"mean": 3, "adaptive_median": 7}
+        self._active_spatial_filter_type = "mean"
         spatial_filters = QVBoxLayout()
         for text, value in (
             ("算数均值滤波", "mean"),
@@ -958,8 +960,14 @@ class ParamPanel(QGroupBox):
         self.usm_amount_label.setVisible(filter_type == "usm")
 
     def _on_spatial_filter_changed(self, button) -> None:
-        if button.property("filter_type") == "adaptive_median":
-            self.kernel_size.setValue(7)
+        previous = self._active_spatial_filter_type
+        self._spatial_kernel_sizes[previous] = self.kernel_size.value()
+        filter_type = button.property("filter_type")
+        default_size = 7 if filter_type == "adaptive_median" else 3
+        self.kernel_size.setValue(
+            self._spatial_kernel_sizes.get(filter_type, default_size)
+        )
+        self._active_spatial_filter_type = filter_type
         self._sync_spatial_visibility()
 
     def _sync_noise_visibility(self) -> None:
@@ -1025,6 +1033,8 @@ class ParamPanel(QGroupBox):
             self._schedule()
         elif operation == "spatial":
             self.spatial_filter_group.buttons()[0].setChecked(True)
+            self._spatial_kernel_sizes = {"mean": 3, "adaptive_median": 7}
+            self._active_spatial_filter_type = "mean"
             self.kernel_size.setValue(3)
             self.median_ratio.setValue(50)
             self.bilateral_sigma_color.setValue(75)
