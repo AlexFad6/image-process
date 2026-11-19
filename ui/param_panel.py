@@ -172,7 +172,7 @@ class ParamPanel(QGroupBox):
         self.spatial_filter_group.buttons()[0].setChecked(True)
         self.spatial_filter_group.buttonClicked.connect(self._emit_spatial)
         self.spatial_filter_group.buttonClicked.connect(
-            lambda button: self._sync_spatial_visibility()
+            self._on_spatial_filter_changed
         )
 
         self.kernel_size = QSpinBox(page)
@@ -956,6 +956,11 @@ class ParamPanel(QGroupBox):
         self.bilateral_sigma_space_label.setVisible(filter_type == "bilateral")
         self.usm_amount_row.setVisible(filter_type == "usm")
         self.usm_amount_label.setVisible(filter_type == "usm")
+
+    def _on_spatial_filter_changed(self, button) -> None:
+        if button.property("filter_type") == "adaptive_median":
+            self.kernel_size.setValue(7)
+        self._sync_spatial_visibility()
 
     def _sync_noise_visibility(self) -> None:
         filter_type = self.noise_group.checkedButton().property("filter_type")
