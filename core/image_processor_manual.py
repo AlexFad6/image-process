@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
+import cv2
 import numpy as np
+from scipy.signal import fftconvolve
 
 class ManualImageProcessor:
     """使用NumPy操作实现的图像处理算法。"""
@@ -125,12 +129,64 @@ class ManualImageProcessor:
         return np.clip(result, 0, 255).astype(np.uint8)
 
     @staticmethod
+    def wiener_filter(
+        image: np.ndarray,
+        kernel: np.ndarray,
+        noise_ratio: float = 0.01,
+    ) -> np.ndarray:
+        """Use a frequency-domain Wiener filter to restore a grayscale image."""
+        values = np.asarray(image, dtype=np.float32)
+        if values.ndim == 3:
+            values = ManualImageProcessor.to_gray(values).astype(np.float32)
+        if values.ndim != 2:
+            raise ValueError("Wiener filtering requires a grayscale image")
+
+        psf = np.asarray(kernel, dtype=np.float32)
+        if psf.ndim != 2 or psf.shape[0] != psf.shape[1]:
+            raise ValueError("PSF kernel must be a square 2D array")
+        psf = np.maximum(psf, 0)
+        psf /= np.maximum(float(psf.sum()), 1e-12)
+        if noise_ratio <= 0:
+            raise ValueError("Wiener noise ratio must be positive")
+
+        height, width = values.shape
+        kh, kw = psf.shape
+        kh = min(kh, height)
+        kw = min(kw, width)
+        if kh % 2 == 0:
+            kh -= 1
+        if kw % 2 == 0:
+            kw -= 1
+        kh = max(kh, 1)
+        kw = max(kw, 1)
+        source_y = (psf.shape[0] - kh) // 2
+        source_x = (psf.shape[1] - kw) // 2
+        psf = psf[source_y:source_y + kh, source_x:source_x + kw]
+        psf /= np.maximum(float(psf.sum()), 1e-12)
+
+        psf_padded = np.zeros((height, width), dtype=np.float32)
+        start_y = (height - kh) // 2
+        start_x = (width - kw) // 2
+        psf_padded[start_y:start_y + kh, start_x:start_x + kw] = psf
+
+        psf_shifted = np.roll(psf_padded, (-(kh // 2), -(kw // 2)), axis=(0, 1))
+        image_fft = np.fft.fft2(values)
+        psf_fft = np.fft.fft2(psf_shifted)
+        psf_conj = np.conj(psf_fft)
+        restored_fft = psf_conj / (np.abs(psf_fft) ** 2 + noise_ratio) * image_fft
+        restored = np.real(np.fft.ifft2(restored_fft))
+        return np.clip(restored, 0, 255).astype(np.uint8)
+
+    @staticmethod
     def blind_deconvolution(
         image: np.ndarray,
         initial_psf: np.ndarray,
         iterations: int = 30,
         update_interval: int = 5,
         epsilon: float = 1e-8,
+        progress_callback: Callable[[np.ndarray, int], None] | None = None,
+        image_damping: float = 1.0,
+        psf_damping: float = 0.05,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Alternate Richardson-Lucy updates for the image and PSF."""
         values = np.asarray(image, dtype=np.float32)
@@ -138,7 +194,13 @@ class ManualImageProcessor:
             values = ManualImageProcessor.to_gray(values)
         if values.ndim != 2:
             raise ValueError("Blind deconvolution requires a grayscale image")
-        if iterations < 1 or update_interval < 1 or epsilon <= 0:
+        if (
+            iterations < 1
+            or update_interval < 1
+            or epsilon <= 0
+            or not 0 < image_damping <= 1
+            or not 0 < psf_damping <= 1
+        ):
             raise ValueError("Blind deconvolution parameters are invalid")
         psf = np.asarray(initial_psf, dtype=np.float32).copy()
         if psf.ndim != 2 or psf.shape[0] != psf.shape[1] or psf.shape[0] % 2 == 0:
@@ -151,42 +213,72 @@ class ManualImageProcessor:
         observed = np.clip(values / 255.0, 0, 1)
         estimate = observed.copy()
 
+        def preview_psf() -> np.ndarray:
+            preview_peak = float(psf.max())
+            if not np.isfinite(preview_peak) or preview_peak <= epsilon:
+                raise ValueError("Estimated PSF has no positive peak")
+            return np.ascontiguousarray(
+                np.clip(psf / preview_peak * 255, 0, 255).astype(np.uint8)
+            )
+
+        if progress_callback is not None:
+            progress_callback(preview_psf(), 0)
+
         def convolve(source: np.ndarray, kernel: np.ndarray) -> np.ndarray:
-            shape = source.shape
-            padded_kernel = np.zeros(shape, dtype=np.float32)
-            kh, kw = kernel.shape
-            padded_kernel[:kh, :kw] = kernel
-            padded_kernel = np.roll(padded_kernel, -kh // 2, axis=0)
-            padded_kernel = np.roll(padded_kernel, -kw // 2, axis=1)
-            return np.real(np.fft.ifft2(np.fft.fft2(source) * np.fft.fft2(padded_kernel)))
+            return cv2.filter2D(
+                source,
+                cv2.CV_32F,
+                kernel,
+                borderType=cv2.BORDER_REPLICATE,
+            )
 
         def flip(kernel: np.ndarray) -> np.ndarray:
             return kernel[::-1, ::-1]
 
         for step in range(1, iterations + 1):
             estimate_blurred = np.maximum(convolve(estimate, psf), epsilon)
-            estimate *= convolve(observed / estimate_blurred, flip(psf))
+            updated_estimate = estimate * convolve(
+                observed / estimate_blurred, flip(psf)
+            )
+            estimate = (
+                (1.0 - image_damping) * estimate
+                + image_damping * updated_estimate
+            )
             estimate = np.clip(estimate, 0, 1)
             if step % update_interval == 0:
                 ratio = observed / np.maximum(convolve(estimate, psf), epsilon)
-                correlation = convolve(ratio, flip(estimate))
-                height, width = correlation.shape
                 radius = psf.shape[0] // 2
-                center_y, center_x = height // 2, width // 2
+                correlation = fftconvolve(
+                    ratio, estimate[::-1, ::-1], mode="full"
+                )
+                sensitivity = fftconvolve(
+                    np.ones_like(observed), estimate[::-1, ::-1], mode="full"
+                )
+                center_y, center_x = estimate.shape[0] - 1, estimate.shape[1] - 1
                 updated = correlation[
                     center_y - radius : center_y + radius + 1,
                     center_x - radius : center_x + radius + 1,
                 ]
+                sensitivity = sensitivity[
+                    center_y - radius : center_y + radius + 1,
+                    center_x - radius : center_x + radius + 1,
+                ]
+                updated /= np.maximum(sensitivity, epsilon)
+                updated *= psf
                 updated = np.maximum(updated, 0)
                 updated_total = float(updated.sum())
                 if np.isfinite(updated_total) and updated_total > epsilon:
-                    psf = updated / updated_total
+                    updated /= updated_total
+                    psf = (
+                        (1.0 - psf_damping) * psf
+                        + psf_damping * updated
+                    )
+                    psf /= np.maximum(psf.sum(), epsilon)
+            if progress_callback is not None:
+                progress_callback(preview_psf(), step)
 
         restored = np.clip(estimate * 255, 0, 255).astype(np.uint8)
-        preview_peak = float(psf.max())
-        if not np.isfinite(preview_peak) or preview_peak <= epsilon:
-            raise ValueError("Estimated PSF has no positive peak")
-        preview = np.clip(psf / preview_peak * 255, 0, 255).astype(np.uint8)
+        preview = preview_psf()
         return np.ascontiguousarray(restored), np.ascontiguousarray(preview)
 
     @staticmethod

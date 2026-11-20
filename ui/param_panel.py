@@ -49,6 +49,7 @@ class ParamPanel(QGroupBox):
     houghChanged = Signal(object)
     restorationChanged = Signal(object)
     blindDeconvolutionRequested = Signal()
+    wienerFilterRequested = Signal()
     fftRequested = Signal()
     ifftRequested = Signal()
     magnitudeIfftRequested = Signal()
@@ -513,7 +514,11 @@ class ParamPanel(QGroupBox):
         form = QFormLayout(page)
         self.restoration_mode_group = QButtonGroup(page)
         mode_layout = QHBoxLayout()
-        for text, value in (("模糊退化", "degradation"), ("盲去卷积", "blind_deconvolution")):
+        for text, value in (
+            ("模糊退化", "degradation"),
+            ("维纳滤波", "wiener"),
+            ("盲去卷积", "blind_deconvolution"),
+        ):
             button = QRadioButton(text, page)
             button.setProperty("restoration_mode", value)
             self.restoration_mode_group.addButton(button)
@@ -527,25 +532,43 @@ class ParamPanel(QGroupBox):
         form.addRow(self.restoration_blind_notice)
         self.blind_iterations = QSpinBox(page)
         self.blind_iterations.setRange(1, 200)
-        self.blind_iterations.setValue(30)
+        self.blind_iterations.setValue(50)
         form.addRow(self.tr("盲去卷积迭代次数"), self.blind_iterations)
         self.blind_iterations_label = form.labelForField(self.blind_iterations)
         self.blind_update_interval = QSpinBox(page)
         self.blind_update_interval.setRange(1, 50)
-        self.blind_update_interval.setValue(5)
+        self.blind_update_interval.setValue(2)
         form.addRow(self.tr("PSF 更新间隔"), self.blind_update_interval)
         self.blind_update_interval_label = form.labelForField(
             self.blind_update_interval
         )
         self.blind_epsilon = QDoubleSpinBox(page)
-        self.blind_epsilon.setRange(1e-12, 1)
+        self.blind_epsilon.setRange(1e-6, 1)
         self.blind_epsilon.setDecimals(12)
-        self.blind_epsilon.setValue(1e-8)
+        self.blind_epsilon.setValue(1e-6)
         form.addRow(self.tr("稳定项"), self.blind_epsilon)
         self.blind_epsilon_label = form.labelForField(self.blind_epsilon)
         self.blind_start_button = QPushButton(self.tr("开始处理"), page)
         self.blind_start_button.clicked.connect(self.blindDeconvolutionRequested)
         form.addRow(self.blind_start_button)
+        self.wiener_noise_ratio = QDoubleSpinBox(page)
+        self.wiener_noise_ratio.setRange(1e-6, 1.0)
+        self.wiener_noise_ratio.setDecimals(6)
+        self.wiener_noise_ratio.setSingleStep(0.001)
+        self.wiener_noise_ratio.setValue(0.01)
+        form.addRow(self.tr("维纳噪声比"), self.wiener_noise_ratio)
+        self.wiener_noise_ratio_label = form.labelForField(self.wiener_noise_ratio)
+        self.wiener_noise_ratio.valueChanged.connect(self._emit_restoration)
+        self.wiener_start_button = QPushButton(self.tr("开始处理"), page)
+        self.wiener_start_button.clicked.connect(self.wienerFilterRequested)
+        form.addRow(self.wiener_start_button)
+        self.blind_psf_title = QLabel(self.tr("当前 PSF 预览"), page)
+        form.addRow(self.blind_psf_title)
+        self.blind_psf_preview = QLabel(page)
+        self.blind_psf_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.blind_psf_preview.setMinimumSize(180, 180)
+        self.blind_psf_preview.setText(self.tr("等待处理"))
+        form.addRow(self.blind_psf_preview)
         for widget in (
             self.blind_iterations,
             self.blind_update_interval,
@@ -578,7 +601,7 @@ class ParamPanel(QGroupBox):
         self.restoration_size = QSpinBox(page)
         self.restoration_size.setRange(3, 255)
         self.restoration_size.setSingleStep(2)
-        self.restoration_size.setValue(31)
+        self.restoration_size.setValue(21)
         form.addRow(self.tr("PSF 大小"), self.restoration_size)
         self.restoration_size_label = form.labelForField(self.restoration_size)
         self.restoration_size.valueChanged.connect(self._emit_restoration)
@@ -603,35 +626,42 @@ class ParamPanel(QGroupBox):
     def _sync_restoration_mode(self, *_args) -> None:
         mode = self.restoration_mode_group.checkedButton().property("restoration_mode")
         degradation = mode == "degradation"
-        self.restoration_blind_notice.setVisible(not degradation)
+        wiener = mode == "wiener"
+        blind = mode == "blind_deconvolution"
+        self.restoration_blind_notice.setVisible(blind)
         for widget in (
             self.blind_iterations, self.blind_update_interval, self.blind_epsilon
         ):
-            widget.setVisible(not degradation)
+            widget.setVisible(blind)
         for label in (
             self.blind_iterations_label,
             self.blind_update_interval_label,
             self.blind_epsilon_label,
         ):
-            label.setVisible(not degradation)
-        self.blind_start_button.setVisible(not degradation)
+            label.setVisible(blind)
+        self.blind_start_button.setVisible(blind)
+        self.blind_psf_title.setVisible(blind)
+        self.blind_psf_preview.setVisible(blind)
+        self.wiener_noise_ratio.setVisible(wiener)
+        self.wiener_noise_ratio_label.setVisible(wiener)
+        self.wiener_start_button.setVisible(wiener)
         for widget in (
             self.restoration_type, self.restoration_size, self.restoration_preview,
             self.motion_length, self.motion_angle, self.defocus_radius,
             self.gaussian_sigma, self.turbulence_strength,
             self.diffraction_wavelength, self.diffraction_aperture,
         ):
-            widget.setVisible(degradation)
-        self.restoration_size_label.setVisible(degradation)
-        self.restoration_type_label.setVisible(degradation)
+            widget.setVisible(degradation or wiener)
+        self.restoration_size_label.setVisible(degradation or wiener)
+        self.restoration_type_label.setVisible(degradation or wiener)
         for name in (
             "motion_length", "motion_angle", "defocus_radius", "gaussian_sigma",
             "turbulence_strength", "diffraction_wavelength", "diffraction_aperture",
         ):
             getattr(self, name + "_label").setVisible(
-                degradation and getattr(self, name).isVisible()
+                (degradation or wiener) and getattr(self, name).isVisible()
             )
-        if degradation:
+        if degradation or wiener:
             self._sync_restoration_visibility()
 
     def set_blind_processing(self, processing: bool) -> None:
@@ -641,9 +671,22 @@ class ParamPanel(QGroupBox):
         )
 
     def set_restoration_preview(self, image) -> None:
+        self._set_psf_preview(self.restoration_preview, image)
+
+    def set_blind_psf_preview(self, image, step: int | None = None) -> None:
+        if image is None:
+            self.blind_psf_preview.clear()
+            self.blind_psf_preview.setText(self.tr("等待处理"))
+            return
+        self._set_psf_preview(self.blind_psf_preview, image)
+        if step is not None:
+            self.blind_psf_title.setText(self.tr("第 {} 步 PSF 预览").format(step))
+
+    @staticmethod
+    def _set_psf_preview(target: QLabel, image) -> None:
         values = np.asarray(image, dtype=np.uint8)
         if values.ndim != 2 or values.size == 0:
-            self.restoration_preview.clear()
+            target.clear()
             return
         height, width = values.shape
         qimage = QImage(
@@ -654,9 +697,9 @@ class ParamPanel(QGroupBox):
             QImage.Format.Format_Grayscale8,
         ).copy()
         pixmap = QPixmap.fromImage(qimage)
-        self.restoration_preview.setPixmap(
+        target.setPixmap(
             pixmap.scaled(
-                self.restoration_preview.size(),
+                target.size(),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.FastTransformation,
             )
@@ -1263,9 +1306,9 @@ class ParamPanel(QGroupBox):
             self.turbulence_strength.setValue(0.0025)
             self.diffraction_wavelength.setValue(550)
             self.diffraction_aperture.setValue(2)
-            self.blind_iterations.setValue(30)
-            self.blind_update_interval.setValue(5)
-            self.blind_epsilon.setValue(1e-8)
+            self.blind_iterations.setValue(50)
+            self.blind_update_interval.setValue(2)
+            self.blind_epsilon.setValue(1e-6)
             self._sync_restoration_visibility()
             self._sync_restoration_mode()
             self._emit_restoration()
@@ -1326,6 +1369,7 @@ class ParamPanel(QGroupBox):
             blind_iterations=self.blind_iterations.value(),
             blind_update_interval=self.blind_update_interval.value(),
             blind_epsilon=self.blind_epsilon.value(),
+            wiener_noise_ratio=self.wiener_noise_ratio.value(),
         )
 
     def transform_params(self) -> TransformParams:

@@ -60,6 +60,7 @@ def _apply_extended_frequency_filter(dft_shift, params, processor):
 class ProcessingWorker(QObject):
     finished = Signal(object, int)
     failed = Signal(str, int)
+    psf_preview = Signal(object, int, int)
 
     def __init__(self, operation: str, payload: tuple, generation: int) -> None:
         super().__init__()
@@ -174,14 +175,30 @@ class ProcessingWorker(QObject):
                 self.finished.emit(result, self.generation)
             elif self.operation == "restoration":
                 processor, image, params = self.payload
-                if params.mode == "blind_deconvolution":
-                    initial_psf = processor.generate_psf_kernel(
-                        params.psf_type, params.size,
-                        params.motion_length, params.motion_angle,
-                        params.defocus_radius, params.gaussian_sigma,
+                if params.mode == "wiener":
+                    kernel = processor.generate_psf_kernel(
+                        params.psf_type,
+                        params.size,
+                        params.motion_length,
+                        params.motion_angle,
+                        params.defocus_radius,
+                        params.gaussian_sigma,
                         params.turbulence_strength,
                         params.diffraction_wavelength,
                         params.diffraction_aperture,
+                    )
+                    result = processor.wiener_filter(
+                        image,
+                        kernel,
+                        params.wiener_noise_ratio,
+                    )
+                    self.finished.emit(result, self.generation)
+                    return
+                if params.mode == "blind_deconvolution":
+                    initial_psf = processor.generate_psf_kernel(
+                        "gaussian",
+                        params.size,
+                        gaussian_sigma=max(params.size / 6.0, 1.0),
                     )
                     result = processor.blind_deconvolution(
                         image,
@@ -189,6 +206,9 @@ class ProcessingWorker(QObject):
                         params.blind_iterations,
                         params.blind_update_interval,
                         params.blind_epsilon,
+                        lambda preview, step: self.psf_preview.emit(
+                            preview, step, self.generation
+                        ),
                     )
                     self.finished.emit(result, self.generation)
                     return
@@ -397,6 +417,7 @@ class MainWindow(QMainWindow):
         self.params.blindDeconvolutionRequested.connect(
             self.start_blind_deconvolution
         )
+        self.params.wienerFilterRequested.connect(self.start_wiener_filter)
         self.params.binarizationChanged.connect(self.apply_binarization_params)
         self.params.edgeChanged.connect(self.apply_edge_params)
         self.params.houghChanged.connect(self.apply_hough_params)
@@ -863,8 +884,8 @@ class MainWindow(QMainWindow):
     def apply_restoration_params(self, params) -> None:
         previous_mode = self.state.restoration_params.mode
         self.state.restoration_params = params
-        if params.mode == "blind_deconvolution":
-            if previous_mode != "blind_deconvolution" and self.state.source is not None:
+        if params.mode in ("wiener", "blind_deconvolution"):
+            if previous_mode != params.mode and self.state.source is not None:
                 self.state.result = self.state.source.copy()
                 self.state.result_frequency_data = None
                 self.state.result_fft_spectrum_uint8 = None
@@ -879,11 +900,22 @@ class MainWindow(QMainWindow):
             "restoration", (self.processor, self.state.source.copy(), params)
         )
 
+    def start_wiener_filter(self) -> None:
+        params = self.params.restoration_params()
+        if params.mode != "wiener" or self.state.source is None:
+            return
+        self.state.restoration_params = params
+        self._processing_generation += 1
+        self._start_processing(
+            "restoration", (self.processor, self.state.source.copy(), params)
+        )
+
     def start_blind_deconvolution(self) -> None:
         params = self.params.restoration_params()
         if params.mode != "blind_deconvolution" or self.state.source is None:
             return
         self.state.restoration_params = params
+        self.params.set_blind_psf_preview(None)
         self.params.set_blind_processing(True)
         self._processing_generation += 1
         self._start_processing(
@@ -950,6 +982,7 @@ class MainWindow(QMainWindow):
         thread.started.connect(worker.run)
         worker.finished.connect(self._processing_finished)
         worker.failed.connect(self._processing_failed)
+        worker.psf_preview.connect(self._blind_psf_preview)
         worker.finished.connect(thread.quit)
         worker.failed.connect(thread.quit)
         thread.finished.connect(worker.deleteLater)
@@ -957,6 +990,11 @@ class MainWindow(QMainWindow):
         thread.finished.connect(lambda: self._processing_jobs.pop(generation, None))
         self._processing_jobs[generation] = (thread, worker)
         thread.start()
+
+    def _blind_psf_preview(self, preview, step: int, generation: int) -> None:
+        if generation != self._processing_generation:
+            return
+        self.params.set_blind_psf_preview(preview, step)
 
     def _processing_finished(self, result, generation: int) -> None:
         if generation != self._processing_generation:
@@ -980,7 +1018,12 @@ class MainWindow(QMainWindow):
             self.state.result_frequency_data = None
             self.state.result_fft_spectrum_uint8 = None
             self.state.result_phase_spectrum_uint8 = None
-            self.params.set_restoration_preview(preview)
+            if self.state.restoration_params.mode == "blind_deconvolution":
+                self.params.set_blind_psf_preview(
+                    preview, self.state.restoration_params.blind_iterations
+                )
+            else:
+                self.params.set_restoration_preview(preview)
             self.params.set_blind_processing(False)
         elif operation == "binarization":
             self.state.result = result
