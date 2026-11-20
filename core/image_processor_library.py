@@ -86,6 +86,24 @@ class LibraryImageProcessor:
         return image.astype(np.uint8, copy=False)
 
     @staticmethod
+    def generate_psf(*args, **kwargs) -> np.ndarray:
+        from .image_processor_manual import ManualImageProcessor
+
+        return ManualImageProcessor.generate_psf(*args, **kwargs)
+
+    @staticmethod
+    def generate_psf_kernel(*args, **kwargs) -> np.ndarray:
+        from .image_processor_manual import ManualImageProcessor
+
+        return ManualImageProcessor.generate_psf_kernel(*args, **kwargs)
+
+    @staticmethod
+    def apply_psf(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
+        from .image_processor_manual import ManualImageProcessor
+
+        return ManualImageProcessor.apply_psf(image, kernel)
+
+    @staticmethod
     def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
         """将值域线性映射到[0,255]"""
         """Normalize the value range to [0, 255]"""

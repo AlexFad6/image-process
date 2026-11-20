@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import numpy as np
 from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QButtonGroup,
@@ -30,6 +32,7 @@ from core.app_state import (
     FrequencyParams,
     HoughParams,
     GeometryParams,
+    RestorationParams,
     SpatialParams,
     TransformParams,
 )
@@ -44,6 +47,7 @@ class ParamPanel(QGroupBox):
     binarizationChanged = Signal(object)
     edgeChanged = Signal(object)
     houghChanged = Signal(object)
+    restorationChanged = Signal(object)
     fftRequested = Signal()
     ifftRequested = Signal()
     magnitudeIfftRequested = Signal()
@@ -63,6 +67,7 @@ class ParamPanel(QGroupBox):
         self.spatial_page = self._create_spatial_page()
         self.frequency_page = self._create_frequency_page()
         self.geometry_page = self._create_geometry_page()
+        self.restoration_page = self._create_restoration_page()
         self.binarization_page = self._create_binarization_page()
         self.edge_page = self._create_edge_page()
         self.hough_page = self._create_hough_page()
@@ -71,6 +76,7 @@ class ParamPanel(QGroupBox):
             self.noise_page,
             self.spatial_page,
             self.frequency_page,
+            self.restoration_page,
             self.geometry_page,
             self.binarization_page,
             self.edge_page,
@@ -501,6 +507,76 @@ class ParamPanel(QGroupBox):
         self._set_frequency_controls_enabled(False)
         return page
 
+    def _create_restoration_page(self) -> QWidget:
+        page = QWidget(self)
+        form = QFormLayout(page)
+        self.restoration_type = QComboBox(page)
+        for text, value in (
+            ("运动模糊", "motion"),
+            ("离焦模糊", "defocus"),
+            ("高斯模糊", "gaussian"),
+            ("大气湍流", "turbulence"),
+            ("衍射极限", "diffraction"),
+        ):
+            self.restoration_type.addItem(text, value)
+        form.addRow(self.tr("点扩散函数类型"), self.restoration_type)
+
+        def decimal(name, label, minimum, maximum, value, step=0.1):
+            widget = QDoubleSpinBox(page)
+            widget.setRange(minimum, maximum)
+            widget.setValue(value)
+            widget.setSingleStep(step)
+            setattr(self, name, widget)
+            form.addRow(self.tr(label), widget)
+            setattr(self, name + "_label", form.labelForField(widget))
+            widget.valueChanged.connect(self._emit_restoration)
+            return widget
+
+        self.restoration_size = QSpinBox(page)
+        self.restoration_size.setRange(3, 255)
+        self.restoration_size.setSingleStep(2)
+        self.restoration_size.setValue(31)
+        form.addRow(self.tr("PSF 大小"), self.restoration_size)
+        self.restoration_size.valueChanged.connect(self._emit_restoration)
+        decimal("motion_length", "运动长度", 0.1, 255, 15)
+        decimal("motion_angle", "运动角度", -180, 180, 0, 1)
+        decimal("defocus_radius", "离焦半径", 0.1, 255, 5)
+        decimal("gaussian_sigma", "高斯 sigma", 0.1, 255, 3)
+        decimal("turbulence_strength", "湍流强度", 0.0001, 10, 0.0025, 0.0001)
+        decimal("diffraction_wavelength", "波长 (nm)", 1, 10000, 550)
+        decimal("diffraction_aperture", "孔径", 0.01, 1000, 2)
+        self.restoration_preview = QLabel(page)
+        self.restoration_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.restoration_preview.setMinimumSize(180, 180)
+        self.restoration_preview.setText(self.tr("PSF 预览"))
+        form.addRow(self.restoration_preview)
+        self.restoration_type.currentIndexChanged.connect(self._sync_restoration_visibility)
+        self.restoration_type.currentIndexChanged.connect(self._emit_restoration)
+        self._sync_restoration_visibility()
+        return page
+
+    def set_restoration_preview(self, image) -> None:
+        values = np.asarray(image, dtype=np.uint8)
+        if values.ndim != 2 or values.size == 0:
+            self.restoration_preview.clear()
+            return
+        height, width = values.shape
+        qimage = QImage(
+            values.data,
+            width,
+            height,
+            width,
+            QImage.Format.Format_Grayscale8,
+        ).copy()
+        pixmap = QPixmap.fromImage(qimage)
+        self.restoration_preview.setPixmap(
+            pixmap.scaled(
+                self.restoration_preview.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation,
+            )
+        )
+
     def _create_geometry_page(self) -> QWidget:
         page = QWidget(self)
         page.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
@@ -775,6 +851,26 @@ class ParamPanel(QGroupBox):
 
     def _emit_hough(self, *_args) -> None:
         self.houghChanged.emit(self.hough_params())
+
+    def _emit_restoration(self, *_args) -> None:
+        self.restorationChanged.emit(self.restoration_params())
+
+    def _sync_restoration_visibility(self, *_args) -> None:
+        psf_type = self.restoration_type.currentData()
+        groups = {
+            "motion": ("motion_length", "motion_angle"),
+            "defocus": ("defocus_radius",),
+            "gaussian": ("gaussian_sigma",),
+            "turbulence": ("turbulence_strength",),
+            "diffraction": ("diffraction_wavelength", "diffraction_aperture"),
+        }
+        visible = set(groups[psf_type])
+        for name in (
+            "motion_length", "motion_angle", "defocus_radius", "gaussian_sigma",
+            "turbulence_strength", "diffraction_wavelength", "diffraction_aperture",
+        ):
+            getattr(self, name).setVisible(name in visible)
+            getattr(self, name + "_label").setVisible(name in visible)
 
     def _sync_hough_visibility(self) -> None:
         is_lines = self.hough_mode_group.checkedButton().property("hough_mode") == "lines"
@@ -1071,6 +1167,18 @@ class ParamPanel(QGroupBox):
         elif operation == "geometry":
             self.geometry_group.buttons()[0].setChecked(True)
             self._emit_geometry()
+        elif operation == "restoration":
+            self.restoration_type.setCurrentIndex(0)
+            self.restoration_size.setValue(31)
+            self.motion_length.setValue(15)
+            self.motion_angle.setValue(0)
+            self.defocus_radius.setValue(5)
+            self.gaussian_sigma.setValue(3)
+            self.turbulence_strength.setValue(0.0025)
+            self.diffraction_wavelength.setValue(550)
+            self.diffraction_aperture.setValue(2)
+            self._sync_restoration_visibility()
+            self._emit_restoration()
         else:
             operation = self.operation_name()
             if operation == "binarization":
@@ -1111,6 +1219,19 @@ class ParamPanel(QGroupBox):
             max_radius=self.hough_max_radius.value(),
             color=tuple(spin.value() for spin in self.hough_color),
             thickness=self.hough_thickness.value(),
+        )
+
+    def restoration_params(self) -> RestorationParams:
+        return RestorationParams(
+            psf_type=self.restoration_type.currentData(),
+            size=self.restoration_size.value(),
+            motion_length=self.motion_length.value(),
+            motion_angle=self.motion_angle.value(),
+            defocus_radius=self.defocus_radius.value(),
+            gaussian_sigma=self.gaussian_sigma.value(),
+            turbulence_strength=self.turbulence_strength.value(),
+            diffraction_wavelength=self.diffraction_wavelength.value(),
+            diffraction_aperture=self.diffraction_aperture.value(),
         )
 
     def transform_params(self) -> TransformParams:
@@ -1272,6 +1393,7 @@ class ParamPanel(QGroupBox):
             "noise",
             "spatial",
             "frequency",
+            "restoration",
             "geometry",
             "binarization",
             "edge",
@@ -1284,6 +1406,7 @@ class ParamPanel(QGroupBox):
             "noise",
             "spatial",
             "frequency",
+            "restoration",
             "geometry",
             "binarization",
             "edge",
@@ -1296,6 +1419,7 @@ class ParamPanel(QGroupBox):
                 "noise",
                 "spatial",
                 "frequency",
+                "restoration",
                 "geometry",
                 "binarization",
                 "edge",

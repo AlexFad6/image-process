@@ -172,6 +172,26 @@ class ProcessingWorker(QObject):
                 else:
                     raise ValueError(f"Unsupported geometric transform: {params.transform_type}")
                 self.finished.emit(result, self.generation)
+            elif self.operation == "restoration":
+                processor, image, params = self.payload
+                kernel = processor.generate_psf_kernel(
+                    params.psf_type, params.size,
+                    params.motion_length, params.motion_angle,
+                    params.defocus_radius, params.gaussian_sigma,
+                    params.turbulence_strength,
+                    params.diffraction_wavelength,
+                    params.diffraction_aperture,
+                )
+                preview = processor.generate_psf(
+                    params.psf_type, params.size,
+                    params.motion_length, params.motion_angle,
+                    params.defocus_radius, params.gaussian_sigma,
+                    params.turbulence_strength,
+                    params.diffraction_wavelength,
+                    params.diffraction_aperture,
+                )
+                result = processor.apply_psf(image, kernel)
+                self.finished.emit((result, preview), self.generation)
             elif self.operation == "binarization":
                 processor, image, params = self.payload
                 result = processor.binarize(
@@ -355,6 +375,7 @@ class MainWindow(QMainWindow):
         self.params.noiseChanged.connect(self.apply_noise_params)
         self.params.spatialChanged.connect(self.apply_spatial_params)
         self.params.geometryChanged.connect(self.apply_geometry_params)
+        self.params.restorationChanged.connect(self.apply_restoration_params)
         self.params.binarizationChanged.connect(self.apply_binarization_params)
         self.params.edgeChanged.connect(self.apply_edge_params)
         self.params.houghChanged.connect(self.apply_hough_params)
@@ -471,6 +492,7 @@ class MainWindow(QMainWindow):
             ("噪声添加", "noise"),
             ("空间滤波", "spatial"),
             ("频域滤波", "frequency"),
+            ("图像复原", "restoration"),
             ("几何变换", "geometry"),
             ("二值化", "binarization"),
             ("边缘检测", "edge"),
@@ -503,6 +525,8 @@ class MainWindow(QMainWindow):
             self.apply_spatial_params(self.params.spatial_params())
         elif operation == "geometry":
             self.apply_geometry_params(self.params.geometry_params())
+        elif operation == "restoration":
+            self.apply_restoration_params(self.params.restoration_params())
         elif operation == "binarization":
             self.apply_binarization_params(self.params.binarization_params())
         elif operation == "edge":
@@ -548,6 +572,7 @@ class MainWindow(QMainWindow):
         self.operation_actions["spatial"].setText(self.tr("空间滤波"))
         self.operation_actions["frequency"].setText(self.tr("频域滤波"))
         self.operation_actions["geometry"].setText(self.tr("几何变换"))
+        self.operation_actions["restoration"].setText(self.tr("图像复原"))
         self.operation_actions["binarization"].setText(self.tr("二值化"))
         self.operation_actions["edge"].setText(self.tr("边缘检测"))
         self.operation_actions["hough"].setText(self.tr("霍夫变换"))
@@ -814,6 +839,15 @@ class MainWindow(QMainWindow):
             (self.processor, self.state.source.copy(), params),
         )
 
+    def apply_restoration_params(self, params) -> None:
+        if self.state.source is None:
+            return
+        self.state.restoration_params = params
+        self._processing_generation += 1
+        self._start_processing(
+            "restoration", (self.processor, self.state.source.copy(), params)
+        )
+
     def apply_binarization_params(self, params) -> None:
         if self.state.source is None or self.state.source.ndim != 2:
             return
@@ -898,6 +932,13 @@ class MainWindow(QMainWindow):
             self.state.result_fft_spectrum_uint8 = None
             self.state.result_phase_spectrum_uint8 = None
             self.display_mode = "original"
+        elif operation == "restoration":
+            image, preview = result
+            self.state.result = image
+            self.state.result_frequency_data = None
+            self.state.result_fft_spectrum_uint8 = None
+            self.state.result_phase_spectrum_uint8 = None
+            self.params.set_restoration_preview(preview)
         elif operation == "binarization":
             self.state.result = result
             self.state.result_frequency_data = None

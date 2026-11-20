@@ -25,6 +25,106 @@ class ManualImageProcessor:
         return np.clip(gray, 0, 255).astype(np.uint8)
 
     @staticmethod
+    def generate_psf(
+        psf_type: str,
+        size: int,
+        motion_length: float = 15.0,
+        motion_angle: float = 0.0,
+        defocus_radius: float = 5.0,
+        gaussian_sigma: float = 3.0,
+        turbulence_strength: float = 0.0025,
+        diffraction_wavelength: float = 550.0,
+        diffraction_aperture: float = 2.0,
+    ) -> np.ndarray:
+        """Generate a normalized point spread function for restoration."""
+        normalized = ManualImageProcessor.generate_psf_kernel(
+            psf_type, size, motion_length, motion_angle, defocus_radius,
+            gaussian_sigma, turbulence_strength, diffraction_wavelength,
+            diffraction_aperture,
+        )
+        peak = float(normalized.max())
+        if not np.isfinite(peak) or peak <= 0:
+            raise ValueError("Generated PSF has no positive peak")
+        return np.ascontiguousarray(
+            np.clip(normalized / peak * 255, 0, 255).astype(np.uint8)
+        )
+
+    @staticmethod
+    def generate_psf_kernel(
+        psf_type: str,
+        size: int,
+        motion_length: float = 15.0,
+        motion_angle: float = 0.0,
+        defocus_radius: float = 5.0,
+        gaussian_sigma: float = 3.0,
+        turbulence_strength: float = 0.0025,
+        diffraction_wavelength: float = 550.0,
+        diffraction_aperture: float = 2.0,
+    ) -> np.ndarray:
+        """Generate a normalized float PSF kernel for image convolution."""
+        if size < 3 or size % 2 == 0:
+            raise ValueError("PSF size must be an odd number of at least 3")
+        if psf_type not in ("motion", "defocus", "gaussian", "turbulence", "diffraction"):
+            raise ValueError(f"Unsupported PSF type: {psf_type}")
+        axis = np.arange(size, dtype=np.float32) - (size - 1) / 2
+        x, y = np.meshgrid(axis, axis)
+        if psf_type == "motion":
+            if motion_length <= 0:
+                raise ValueError("Motion length must be greater than zero")
+            angle = np.deg2rad(motion_angle)
+            along = x * np.cos(angle) + y * np.sin(angle)
+            across = -x * np.sin(angle) + y * np.cos(angle)
+            psf = (np.abs(along) <= motion_length / 2) & (np.abs(across) <= 0.5)
+        elif psf_type == "defocus":
+            if defocus_radius <= 0:
+                raise ValueError("Defocus radius must be greater than zero")
+            psf = x * x + y * y <= defocus_radius * defocus_radius
+        elif psf_type == "gaussian":
+            if gaussian_sigma <= 0:
+                raise ValueError("Gaussian sigma must be greater than zero")
+            psf = np.exp(-(x * x + y * y) / (2 * gaussian_sigma * gaussian_sigma))
+        elif psf_type == "turbulence":
+            if turbulence_strength <= 0:
+                raise ValueError("Turbulence strength must be greater than zero")
+            frequency_radius = np.hypot(x, y) / size
+            otf = np.exp(-turbulence_strength * frequency_radius ** (5 / 6))
+            psf = np.abs(np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(otf))))
+        else:
+            if diffraction_wavelength <= 0 or diffraction_aperture <= 0:
+                raise ValueError("Diffraction parameters must be greater than zero")
+            numerical_radius = diffraction_aperture / diffraction_wavelength * 1000
+            radial = np.hypot(x, y) / max(numerical_radius, 1e-6)
+            psf = np.sinc(radial) ** 2
+        psf = np.maximum(np.asarray(psf, dtype=np.float32), 0)
+        total = float(psf.sum())
+        if not np.isfinite(total) or total <= 0:
+            raise ValueError("Generated PSF has no energy")
+        normalized = psf / total
+        return np.ascontiguousarray(normalized)
+
+    @staticmethod
+    def apply_psf(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
+        """Convolve an image with a normalized float PSF kernel."""
+        values = np.asarray(image, dtype=np.float32)
+        if values.ndim not in (2, 3):
+            raise ValueError("Image must be grayscale or multi-channel")
+        kernel = np.asarray(kernel, dtype=np.float32)
+        if kernel.ndim != 2 or kernel.shape[0] != kernel.shape[1]:
+            raise ValueError("PSF kernel must be a square 2D array")
+        radius = kernel.shape[0] // 2
+        if radius < 1:
+            raise ValueError("PSF kernel must have a positive radius")
+        pad_width = ((radius, radius), (radius, radius))
+        if values.ndim == 3:
+            pad_width += ((0, 0),)
+        padded = np.pad(values, pad_width, mode="edge")
+        windows = np.lib.stride_tricks.sliding_window_view(
+            padded, kernel.shape, axis=(0, 1)
+        )
+        result = np.sum(windows * kernel, axis=(-2, -1))
+        return np.clip(result, 0, 255).astype(np.uint8)
+
+    @staticmethod
     def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
         """将值域线性映射到[0,255]"""
         """Normalize the value range to [0, 255]"""

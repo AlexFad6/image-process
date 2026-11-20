@@ -75,6 +75,19 @@ class GeometryParams:
 
 
 @dataclass
+class RestorationParams:
+    psf_type: str = "motion"
+    size: int = 31
+    motion_length: float = 15.0
+    motion_angle: float = 0.0
+    defocus_radius: float = 5.0
+    gaussian_sigma: float = 3.0
+    turbulence_strength: float = 0.0025
+    diffraction_wavelength: float = 550.0
+    diffraction_aperture: float = 2.0
+
+
+@dataclass
 class BinarizationParams:
     method: str = "manual"
     threshold: float = 128.0
@@ -119,6 +132,7 @@ class AppState:
     spatial_params: SpatialParams = field(default_factory=SpatialParams)
     frequency_params: FrequencyParams = field(default_factory=FrequencyParams)
     geometry_params: GeometryParams = field(default_factory=GeometryParams)
+    restoration_params: RestorationParams = field(default_factory=RestorationParams)
     binarization_params: BinarizationParams = field(default_factory=BinarizationParams)
     edge_params: EdgeParams = field(default_factory=EdgeParams)
     hough_params: HoughParams = field(default_factory=HoughParams)
@@ -139,6 +153,7 @@ class AppState:
         self.spatial_params = SpatialParams()
         self.frequency_params = FrequencyParams()
         self.geometry_params = GeometryParams()
+        self.restoration_params = RestorationParams()
         self.binarization_params = BinarizationParams()
         self.edge_params = EdgeParams()
         self.hough_params = HoughParams()
