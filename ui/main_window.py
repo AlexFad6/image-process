@@ -174,6 +174,24 @@ class ProcessingWorker(QObject):
                 self.finished.emit(result, self.generation)
             elif self.operation == "restoration":
                 processor, image, params = self.payload
+                if params.mode == "blind_deconvolution":
+                    initial_psf = processor.generate_psf_kernel(
+                        params.psf_type, params.size,
+                        params.motion_length, params.motion_angle,
+                        params.defocus_radius, params.gaussian_sigma,
+                        params.turbulence_strength,
+                        params.diffraction_wavelength,
+                        params.diffraction_aperture,
+                    )
+                    result = processor.blind_deconvolution(
+                        image,
+                        initial_psf,
+                        params.blind_iterations,
+                        params.blind_update_interval,
+                        params.blind_epsilon,
+                    )
+                    self.finished.emit(result, self.generation)
+                    return
                 kernel = processor.generate_psf_kernel(
                     params.psf_type, params.size,
                     params.motion_length, params.motion_angle,
@@ -376,6 +394,9 @@ class MainWindow(QMainWindow):
         self.params.spatialChanged.connect(self.apply_spatial_params)
         self.params.geometryChanged.connect(self.apply_geometry_params)
         self.params.restorationChanged.connect(self.apply_restoration_params)
+        self.params.blindDeconvolutionRequested.connect(
+            self.start_blind_deconvolution
+        )
         self.params.binarizationChanged.connect(self.apply_binarization_params)
         self.params.edgeChanged.connect(self.apply_edge_params)
         self.params.houghChanged.connect(self.apply_hough_params)
@@ -840,9 +861,30 @@ class MainWindow(QMainWindow):
         )
 
     def apply_restoration_params(self, params) -> None:
+        previous_mode = self.state.restoration_params.mode
+        self.state.restoration_params = params
+        if params.mode == "blind_deconvolution":
+            if previous_mode != "blind_deconvolution" and self.state.source is not None:
+                self.state.result = self.state.source.copy()
+                self.state.result_frequency_data = None
+                self.state.result_fft_spectrum_uint8 = None
+                self.state.result_phase_spectrum_uint8 = None
+                self.update_display_mode()
+                self.images.sync_views()
+            return
         if self.state.source is None:
             return
+        self._processing_generation += 1
+        self._start_processing(
+            "restoration", (self.processor, self.state.source.copy(), params)
+        )
+
+    def start_blind_deconvolution(self) -> None:
+        params = self.params.restoration_params()
+        if params.mode != "blind_deconvolution" or self.state.source is None:
+            return
         self.state.restoration_params = params
+        self.params.set_blind_processing(True)
         self._processing_generation += 1
         self._start_processing(
             "restoration", (self.processor, self.state.source.copy(), params)
@@ -939,6 +981,7 @@ class MainWindow(QMainWindow):
             self.state.result_fft_spectrum_uint8 = None
             self.state.result_phase_spectrum_uint8 = None
             self.params.set_restoration_preview(preview)
+            self.params.set_blind_processing(False)
         elif operation == "binarization":
             self.state.result = result
             self.state.result_frequency_data = None
@@ -1000,6 +1043,11 @@ class MainWindow(QMainWindow):
 
     def _processing_failed(self, message: str, generation: int) -> None:
         if generation == self._processing_generation:
+            if (
+                generation in self._processing_jobs
+                and self._processing_jobs[generation][1].operation == "restoration"
+            ):
+                self.params.set_blind_processing(False)
             self.statusBar().showMessage(self.tr("处理失败：") + message)
 
     def apply_ifft(self, component: str = "full") -> None:

@@ -76,6 +76,7 @@ class GeometryParams:
 
 @dataclass
 class RestorationParams:
+    mode: str = "degradation"
     psf_type: str = "motion"
     size: int = 31
     motion_length: float = 15.0
@@ -85,6 +86,9 @@ class RestorationParams:
     turbulence_strength: float = 0.0025
     diffraction_wavelength: float = 550.0
     diffraction_aperture: float = 2.0
+    blind_iterations: int = 30
+    blind_update_interval: int = 5
+    blind_epsilon: float = 1e-8
 
 
 @dataclass

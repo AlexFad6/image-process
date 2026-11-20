@@ -125,6 +125,71 @@ class ManualImageProcessor:
         return np.clip(result, 0, 255).astype(np.uint8)
 
     @staticmethod
+    def blind_deconvolution(
+        image: np.ndarray,
+        initial_psf: np.ndarray,
+        iterations: int = 30,
+        update_interval: int = 5,
+        epsilon: float = 1e-8,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Alternate Richardson-Lucy updates for the image and PSF."""
+        values = np.asarray(image, dtype=np.float32)
+        if values.ndim == 3:
+            values = ManualImageProcessor.to_gray(values)
+        if values.ndim != 2:
+            raise ValueError("Blind deconvolution requires a grayscale image")
+        if iterations < 1 or update_interval < 1 or epsilon <= 0:
+            raise ValueError("Blind deconvolution parameters are invalid")
+        psf = np.asarray(initial_psf, dtype=np.float32).copy()
+        if psf.ndim != 2 or psf.shape[0] != psf.shape[1] or psf.shape[0] % 2 == 0:
+            raise ValueError("Initial PSF must be an odd square array")
+        psf = np.maximum(psf, 0)
+        total = float(psf.sum())
+        if not np.isfinite(total) or total <= epsilon:
+            raise ValueError("Initial PSF has no energy")
+        psf /= total
+        observed = np.clip(values / 255.0, 0, 1)
+        estimate = observed.copy()
+
+        def convolve(source: np.ndarray, kernel: np.ndarray) -> np.ndarray:
+            shape = source.shape
+            padded_kernel = np.zeros(shape, dtype=np.float32)
+            kh, kw = kernel.shape
+            padded_kernel[:kh, :kw] = kernel
+            padded_kernel = np.roll(padded_kernel, -kh // 2, axis=0)
+            padded_kernel = np.roll(padded_kernel, -kw // 2, axis=1)
+            return np.real(np.fft.ifft2(np.fft.fft2(source) * np.fft.fft2(padded_kernel)))
+
+        def flip(kernel: np.ndarray) -> np.ndarray:
+            return kernel[::-1, ::-1]
+
+        for step in range(1, iterations + 1):
+            estimate_blurred = np.maximum(convolve(estimate, psf), epsilon)
+            estimate *= convolve(observed / estimate_blurred, flip(psf))
+            estimate = np.clip(estimate, 0, 1)
+            if step % update_interval == 0:
+                ratio = observed / np.maximum(convolve(estimate, psf), epsilon)
+                correlation = convolve(ratio, flip(estimate))
+                height, width = correlation.shape
+                radius = psf.shape[0] // 2
+                center_y, center_x = height // 2, width // 2
+                updated = correlation[
+                    center_y - radius : center_y + radius + 1,
+                    center_x - radius : center_x + radius + 1,
+                ]
+                updated = np.maximum(updated, 0)
+                updated_total = float(updated.sum())
+                if np.isfinite(updated_total) and updated_total > epsilon:
+                    psf = updated / updated_total
+
+        restored = np.clip(estimate * 255, 0, 255).astype(np.uint8)
+        preview_peak = float(psf.max())
+        if not np.isfinite(preview_peak) or preview_peak <= epsilon:
+            raise ValueError("Estimated PSF has no positive peak")
+        preview = np.clip(psf / preview_peak * 255, 0, 255).astype(np.uint8)
+        return np.ascontiguousarray(restored), np.ascontiguousarray(preview)
+
+    @staticmethod
     def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
         """将值域线性映射到[0,255]"""
         """Normalize the value range to [0, 255]"""

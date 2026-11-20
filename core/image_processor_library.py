@@ -104,6 +104,12 @@ class LibraryImageProcessor:
         return ManualImageProcessor.apply_psf(image, kernel)
 
     @staticmethod
+    def blind_deconvolution(*args, **kwargs) -> tuple[np.ndarray, np.ndarray]:
+        from .image_processor_manual import ManualImageProcessor
+
+        return ManualImageProcessor.blind_deconvolution(*args, **kwargs)
+
+    @staticmethod
     def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
         """将值域线性映射到[0,255]"""
         """Normalize the value range to [0, 255]"""
