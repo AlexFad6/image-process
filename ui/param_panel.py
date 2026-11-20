@@ -529,15 +529,20 @@ class ParamPanel(QGroupBox):
         self.blind_iterations.setRange(1, 200)
         self.blind_iterations.setValue(30)
         form.addRow(self.tr("盲去卷积迭代次数"), self.blind_iterations)
+        self.blind_iterations_label = form.labelForField(self.blind_iterations)
         self.blind_update_interval = QSpinBox(page)
         self.blind_update_interval.setRange(1, 50)
         self.blind_update_interval.setValue(5)
         form.addRow(self.tr("PSF 更新间隔"), self.blind_update_interval)
+        self.blind_update_interval_label = form.labelForField(
+            self.blind_update_interval
+        )
         self.blind_epsilon = QDoubleSpinBox(page)
         self.blind_epsilon.setRange(1e-12, 1)
         self.blind_epsilon.setDecimals(12)
         self.blind_epsilon.setValue(1e-8)
         form.addRow(self.tr("稳定项"), self.blind_epsilon)
+        self.blind_epsilon_label = form.labelForField(self.blind_epsilon)
         self.blind_start_button = QPushButton(self.tr("开始处理"), page)
         self.blind_start_button.clicked.connect(self.blindDeconvolutionRequested)
         form.addRow(self.blind_start_button)
@@ -603,6 +608,12 @@ class ParamPanel(QGroupBox):
             self.blind_iterations, self.blind_update_interval, self.blind_epsilon
         ):
             widget.setVisible(not degradation)
+        for label in (
+            self.blind_iterations_label,
+            self.blind_update_interval_label,
+            self.blind_epsilon_label,
+        ):
+            label.setVisible(not degradation)
         self.blind_start_button.setVisible(not degradation)
         for widget in (
             self.restoration_type, self.restoration_size, self.restoration_preview,
