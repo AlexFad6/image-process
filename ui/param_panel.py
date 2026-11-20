@@ -548,17 +548,82 @@ class ParamPanel(QGroupBox):
         self.blind_epsilon.setValue(1e-6)
         form.addRow(self.tr("稳定项"), self.blind_epsilon)
         self.blind_epsilon_label = form.labelForField(self.blind_epsilon)
+        self.blind_tv_weight = QDoubleSpinBox(page)
+        self.blind_tv_weight.setRange(0, 1)
+        self.blind_tv_weight.setDecimals(4)
+        self.blind_tv_weight.setSingleStep(0.01)
+        self.blind_tv_weight.setValue(0.02)
+        form.addRow(self.tr("TV 正则权重"), self.blind_tv_weight)
+        self.blind_tv_weight_label = form.labelForField(self.blind_tv_weight)
+        self.blind_l0_weight = QDoubleSpinBox(page)
+        self.blind_l0_weight.setRange(0, 1)
+        self.blind_l0_weight.setDecimals(4)
+        self.blind_l0_weight.setSingleStep(0.01)
+        self.blind_l0_weight.setValue(0.02)
+        form.addRow(self.tr("L0 正则权重"), self.blind_l0_weight)
+        self.blind_l0_weight_label = form.labelForField(self.blind_l0_weight)
+        self.blind_sparsity_weight = QDoubleSpinBox(page)
+        self.blind_sparsity_weight.setRange(0, 1)
+        self.blind_sparsity_weight.setDecimals(4)
+        self.blind_sparsity_weight.setSingleStep(0.01)
+        self.blind_sparsity_weight.setValue(0.02)
+        form.addRow(self.tr("稀疏核权重"), self.blind_sparsity_weight)
+        self.blind_sparsity_weight_label = form.labelForField(self.blind_sparsity_weight)
+        self.blind_psf_support = QSpinBox(page)
+        self.blind_psf_support.setRange(0, 255)
+        self.blind_psf_support.setSingleStep(2)
+        self.blind_psf_support.setValue(0)
+        form.addRow(self.tr("PSF 支持半径/直径（0 自动）"), self.blind_psf_support)
+        self.blind_psf_support_label = form.labelForField(self.blind_psf_support)
+        self.blind_multiscale_levels = QSpinBox(page)
+        self.blind_multiscale_levels.setRange(1, 5)
+        self.blind_multiscale_levels.setValue(3)
+        form.addRow(self.tr("多尺度层数"), self.blind_multiscale_levels)
+        self.blind_multiscale_levels_label = form.labelForField(self.blind_multiscale_levels)
+        self.blind_initialization = QComboBox(page)
+        self.blind_initialization.addItem(self.tr("使用选中 PSF"), "selected_psf")
+        self.blind_initialization.addItem(self.tr("归一化稀疏性估计"), "normalized_sparsity")
+        form.addRow(self.tr("核初始化方式"), self.blind_initialization)
+        self.blind_initialization_label = form.labelForField(self.blind_initialization)
         self.blind_start_button = QPushButton(self.tr("开始处理"), page)
         self.blind_start_button.clicked.connect(self.blindDeconvolutionRequested)
         form.addRow(self.blind_start_button)
+        self.wiener_noise_group = QButtonGroup(page)
+        self.wiener_noise_options = QWidget(page)
+        wiener_noise_layout = QVBoxLayout(self.wiener_noise_options)
+        wiener_noise_layout.setContentsMargins(0, 0, 0, 0)
+        for text, value in (
+            ("自动估计噪声", "auto_noise"),
+            ("输入噪声标准差", "noise_std"),
+            ("直接输入噪信功率比", "noise_ratio"),
+        ):
+            button = QRadioButton(self.tr(text), page)
+            button.setProperty("wiener_noise_mode", value)
+            self.wiener_noise_group.addButton(button)
+            wiener_noise_layout.addWidget(button)
+        self.wiener_noise_group.buttons()[2].setChecked(True)
+        form.addRow(self.tr("噪声参数设置"), self.wiener_noise_options)
+
+        self.wiener_noise_std = QDoubleSpinBox(page)
+        self.wiener_noise_std.setRange(0.0, 255.0)
+        self.wiener_noise_std.setDecimals(3)
+        self.wiener_noise_std.setSingleStep(0.5)
+        self.wiener_noise_std.setValue(5.0)
+        form.addRow(self.tr("噪声标准差"), self.wiener_noise_std)
+        self.wiener_noise_std_label = form.labelForField(self.wiener_noise_std)
+
         self.wiener_noise_ratio = QDoubleSpinBox(page)
         self.wiener_noise_ratio.setRange(1e-6, 1.0)
         self.wiener_noise_ratio.setDecimals(6)
         self.wiener_noise_ratio.setSingleStep(0.001)
         self.wiener_noise_ratio.setValue(0.01)
-        form.addRow(self.tr("维纳噪声比"), self.wiener_noise_ratio)
+        form.addRow(self.tr("噪信功率比 K"), self.wiener_noise_ratio)
         self.wiener_noise_ratio_label = form.labelForField(self.wiener_noise_ratio)
+
+        self.wiener_noise_std.valueChanged.connect(self._emit_restoration)
         self.wiener_noise_ratio.valueChanged.connect(self._emit_restoration)
+        self.wiener_noise_group.buttonClicked.connect(self._sync_wiener_noise_visibility)
+        self.wiener_noise_group.buttonClicked.connect(self._emit_restoration)
         self.wiener_start_button = QPushButton(self.tr("开始处理"), page)
         self.wiener_start_button.clicked.connect(self.wienerFilterRequested)
         form.addRow(self.wiener_start_button)
@@ -573,8 +638,14 @@ class ParamPanel(QGroupBox):
             self.blind_iterations,
             self.blind_update_interval,
             self.blind_epsilon,
+            self.blind_tv_weight,
+            self.blind_l0_weight,
+            self.blind_sparsity_weight,
+            self.blind_psf_support,
+            self.blind_multiscale_levels,
         ):
             widget.valueChanged.connect(self._emit_restoration)
+        self.blind_initialization.currentIndexChanged.connect(self._emit_restoration)
         self.restoration_type = QComboBox(page)
         for text, value in (
             ("运动模糊", "motion"),
@@ -623,6 +694,13 @@ class ParamPanel(QGroupBox):
         self._sync_restoration_mode()
         return page
 
+    def _sync_wiener_noise_visibility(self, *_args) -> None:
+        mode = self.wiener_noise_group.checkedButton().property("wiener_noise_mode")
+        self.wiener_noise_std.setVisible(mode == "noise_std")
+        self.wiener_noise_std_label.setVisible(mode == "noise_std")
+        self.wiener_noise_ratio.setVisible(mode == "noise_ratio")
+        self.wiener_noise_ratio_label.setVisible(mode == "noise_ratio")
+
     def _sync_restoration_mode(self, *_args) -> None:
         mode = self.restoration_mode_group.checkedButton().property("restoration_mode")
         degradation = mode == "degradation"
@@ -630,7 +708,9 @@ class ParamPanel(QGroupBox):
         blind = mode == "blind_deconvolution"
         self.restoration_blind_notice.setVisible(blind)
         for widget in (
-            self.blind_iterations, self.blind_update_interval, self.blind_epsilon
+            self.blind_iterations,
+            self.blind_update_interval,
+            self.blind_epsilon,
         ):
             widget.setVisible(blind)
         for label in (
@@ -639,21 +719,48 @@ class ParamPanel(QGroupBox):
             self.blind_epsilon_label,
         ):
             label.setVisible(blind)
+
+        for widget in (
+            self.blind_tv_weight,
+            self.blind_l0_weight,
+            self.blind_sparsity_weight,
+            self.blind_psf_support,
+            self.blind_multiscale_levels,
+            self.blind_initialization,
+        ):
+            widget.setVisible(False)
+        for label in (
+            self.blind_tv_weight_label,
+            self.blind_l0_weight_label,
+            self.blind_sparsity_weight_label,
+            self.blind_psf_support_label,
+            self.blind_multiscale_levels_label,
+            self.blind_initialization_label,
+        ):
+            label.setVisible(False)
         self.blind_start_button.setVisible(blind)
         self.blind_psf_title.setVisible(blind)
         self.blind_psf_preview.setVisible(blind)
-        self.wiener_noise_ratio.setVisible(wiener)
-        self.wiener_noise_ratio_label.setVisible(wiener)
+        self.wiener_noise_options.setVisible(wiener)
+        if wiener:
+            self._sync_wiener_noise_visibility()
+        else:
+            self.wiener_noise_std.setVisible(False)
+            self.wiener_noise_std_label.setVisible(False)
+            self.wiener_noise_ratio.setVisible(False)
+            self.wiener_noise_ratio_label.setVisible(False)
         self.wiener_start_button.setVisible(wiener)
+        psf_controls_visible = degradation or wiener
         for widget in (
-            self.restoration_type, self.restoration_size, self.restoration_preview,
+            self.restoration_type, self.restoration_size,
             self.motion_length, self.motion_angle, self.defocus_radius,
             self.gaussian_sigma, self.turbulence_strength,
             self.diffraction_wavelength, self.diffraction_aperture,
         ):
-            widget.setVisible(degradation or wiener)
-        self.restoration_size_label.setVisible(degradation or wiener)
-        self.restoration_type_label.setVisible(degradation or wiener)
+            widget.setVisible(psf_controls_visible)
+        self.restoration_preview.setVisible(degradation or wiener)
+        self.restoration_size_label.setVisible(psf_controls_visible)
+        self.restoration_type_label.setVisible(psf_controls_visible)
         for name in (
             "motion_length", "motion_angle", "defocus_radius", "gaussian_sigma",
             "turbulence_strength", "diffraction_wavelength", "diffraction_aperture",
@@ -1309,6 +1416,15 @@ class ParamPanel(QGroupBox):
             self.blind_iterations.setValue(50)
             self.blind_update_interval.setValue(2)
             self.blind_epsilon.setValue(1e-6)
+            self.blind_tv_weight.setValue(0.02)
+            self.blind_l0_weight.setValue(0.02)
+            self.blind_sparsity_weight.setValue(0.02)
+            self.blind_psf_support.setValue(0)
+            self.blind_multiscale_levels.setValue(3)
+            self.blind_initialization.setCurrentIndex(0)
+            self.wiener_noise_group.buttons()[2].setChecked(True)
+            self.wiener_noise_std.setValue(5.0)
+            self.wiener_noise_ratio.setValue(0.01)
             self._sync_restoration_visibility()
             self._sync_restoration_mode()
             self._emit_restoration()
@@ -1369,7 +1485,15 @@ class ParamPanel(QGroupBox):
             blind_iterations=self.blind_iterations.value(),
             blind_update_interval=self.blind_update_interval.value(),
             blind_epsilon=self.blind_epsilon.value(),
+            blind_tv_weight=self.blind_tv_weight.value(),
+            blind_l0_weight=self.blind_l0_weight.value(),
+            blind_psf_support=self.blind_psf_support.value(),
+            blind_multiscale_levels=self.blind_multiscale_levels.value(),
+            blind_initialization=self.blind_initialization.currentData(),
+            blind_sparsity_weight=self.blind_sparsity_weight.value(),
+            wiener_noise_mode=self.wiener_noise_group.checkedButton().property("wiener_noise_mode"),
             wiener_noise_ratio=self.wiener_noise_ratio.value(),
+            wiener_noise_std=self.wiener_noise_std.value(),
         )
 
     def transform_params(self) -> TransformParams:

@@ -187,19 +187,41 @@ class ProcessingWorker(QObject):
                         params.diffraction_wavelength,
                         params.diffraction_aperture,
                     )
+                    if params.wiener_noise_mode == "noise_ratio":
+                        noise_ratio = params.wiener_noise_ratio
+                    elif params.wiener_noise_mode == "noise_std":
+                        noise_ratio = processor.estimate_wiener_noise_ratio(
+                            image,
+                            noise_std=params.wiener_noise_std,
+                        )
+                    else:
+                        noise_ratio = processor.estimate_wiener_noise_ratio(image)
                     result = processor.wiener_filter(
                         image,
                         kernel,
-                        params.wiener_noise_ratio,
+                        noise_ratio,
                     )
                     self.finished.emit(result, self.generation)
                     return
                 if params.mode == "blind_deconvolution":
                     initial_psf = processor.generate_psf_kernel(
-                        "gaussian",
+                        params.psf_type,
                         params.size,
-                        gaussian_sigma=max(params.size / 6.0, 1.0),
+                        params.motion_length,
+                        params.motion_angle,
+                        params.defocus_radius,
+                        params.gaussian_sigma,
+                        params.turbulence_strength,
+                        params.diffraction_wavelength,
+                        params.diffraction_aperture,
                     )
+                    if params.blind_initialization == "normalized_sparsity":
+                        initial_psf = processor.estimate_psf_by_normalized_sparsity(
+                            image,
+                            initial_psf,
+                            params.blind_sparsity_weight,
+                            iterations=8,
+                        )
                     result = processor.blind_deconvolution(
                         image,
                         initial_psf,
@@ -209,6 +231,11 @@ class ProcessingWorker(QObject):
                         lambda preview, step: self.psf_preview.emit(
                             preview, step, self.generation
                         ),
+                        tv_weight=params.blind_tv_weight,
+                        l0_weight=params.blind_l0_weight,
+                        psf_support=params.blind_psf_support,
+                        multiscale_levels=params.blind_multiscale_levels,
+                        sparsity_weight=params.blind_sparsity_weight,
                     )
                     self.finished.emit(result, self.generation)
                     return
@@ -1013,17 +1040,33 @@ class MainWindow(QMainWindow):
             self.state.result_phase_spectrum_uint8 = None
             self.display_mode = "original"
         elif operation == "restoration":
-            image, preview = result
-            self.state.result = image
-            self.state.result_frequency_data = None
-            self.state.result_fft_spectrum_uint8 = None
-            self.state.result_phase_spectrum_uint8 = None
             if self.state.restoration_params.mode == "blind_deconvolution":
+                image, preview = result
                 self.params.set_blind_psf_preview(
                     preview, self.state.restoration_params.blind_iterations
                 )
             else:
-                self.params.set_restoration_preview(preview)
+                image = result
+                preview = None
+                if self.state.restoration_params.mode == "wiener":
+                    kernel = self.processor.generate_psf_kernel(
+                        self.state.restoration_params.psf_type,
+                        self.state.restoration_params.size,
+                        self.state.restoration_params.motion_length,
+                        self.state.restoration_params.motion_angle,
+                        self.state.restoration_params.defocus_radius,
+                        self.state.restoration_params.gaussian_sigma,
+                        self.state.restoration_params.turbulence_strength,
+                        self.state.restoration_params.diffraction_wavelength,
+                        self.state.restoration_params.diffraction_aperture,
+                    )
+                    preview = (kernel / kernel.max() * 255).astype(np.uint8)
+                if preview is not None:
+                    self.params.set_restoration_preview(preview)
+            self.state.result = image
+            self.state.result_frequency_data = None
+            self.state.result_fft_spectrum_uint8 = None
+            self.state.result_phase_spectrum_uint8 = None
             self.params.set_blind_processing(False)
         elif operation == "binarization":
             self.state.result = result

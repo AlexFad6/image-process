@@ -129,6 +129,37 @@ class ManualImageProcessor:
         return np.clip(result, 0, 255).astype(np.uint8)
 
     @staticmethod
+    def estimate_wiener_noise_ratio(
+        image: np.ndarray,
+        noise_std: float | None = None,
+    ) -> float:
+        """Estimate N/S from an input noise standard deviation or local noise variance."""
+        values = np.asarray(image, dtype=np.float32)
+        if values.ndim == 3:
+            values = ManualImageProcessor.to_gray(values).astype(np.float32)
+        if values.ndim != 2:
+            raise ValueError("Wiener noise estimation requires a grayscale image")
+
+        normalized = np.clip(values / 255.0, 0, 1)
+        signal_power = max(float(np.mean(normalized * normalized)), 1e-12)
+
+        if noise_std is not None:
+            if noise_std < 0:
+                raise ValueError("Noise standard deviation must be non-negative")
+            noise_std_normalized = float(noise_std) / 255.0
+            noise_power = noise_std_normalized * noise_std_normalized
+        else:
+            laplacian = cv2.Laplacian(normalized, cv2.CV_32F, ksize=3)
+            edge_laplacian = laplacian[np.abs(laplacian) < np.quantile(np.abs(laplacian), 0.50)]
+            if edge_laplacian.size:
+                noise_std_normalized = float(np.std(edge_laplacian))
+            else:
+                noise_std_normalized = float(np.std(normalized))
+            noise_power = noise_std_normalized * noise_std_normalized
+
+        return float(np.clip(noise_power / signal_power, 1e-12, 1.0))
+
+    @staticmethod
     def wiener_filter(
         image: np.ndarray,
         kernel: np.ndarray,
@@ -169,13 +200,77 @@ class ManualImageProcessor:
         start_x = (width - kw) // 2
         psf_padded[start_y:start_y + kh, start_x:start_x + kw] = psf
 
-        psf_shifted = np.roll(psf_padded, (-(kh // 2), -(kw // 2)), axis=(0, 1))
+        psf_shifted = np.fft.fftshift(psf_padded)
         image_fft = np.fft.fft2(values)
         psf_fft = np.fft.fft2(psf_shifted)
         psf_conj = np.conj(psf_fft)
         restored_fft = psf_conj / (np.abs(psf_fft) ** 2 + noise_ratio) * image_fft
         restored = np.real(np.fft.ifft2(restored_fft))
         return np.clip(restored, 0, 255).astype(np.uint8)
+
+    @staticmethod
+    def estimate_psf_by_normalized_sparsity(
+        image: np.ndarray,
+        initial_psf: np.ndarray,
+        sparsity_weight: float = 0.02,
+        iterations: int = 8,
+    ) -> np.ndarray:
+        """Refine a PSF by minimizing normalized gradient sparsity."""
+        values = np.asarray(image, dtype=np.float32)
+        if values.ndim == 3:
+            values = ManualImageProcessor.to_gray(values).astype(np.float32)
+        psf = np.maximum(np.asarray(initial_psf, dtype=np.float32), 0)
+        psf /= max(float(psf.sum()), 1e-12)
+
+        observed = np.clip(values / 255.0, 0, 1)
+        gx = np.hypot(
+            np.diff(observed, axis=1, prepend=observed[:, :1]),
+            np.diff(observed, axis=0, prepend=observed[:1, :]),
+        )
+        edge_mask = gx > np.quantile(gx, 0.55)
+        estimate = observed.copy()
+
+        for _ in range(max(int(iterations), 1)):
+            blurred = cv2.filter2D(
+                estimate, cv2.CV_32F, psf, borderType=cv2.BORDER_REFLECT
+            )
+            ratio = observed / np.maximum(blurred, 1e-12)
+            updated = estimate * cv2.filter2D(
+                ratio,
+                cv2.CV_32F,
+                psf[::-1, ::-1],
+                borderType=cv2.BORDER_REFLECT,
+            )
+            estimate = np.clip(updated, 0, 1)
+
+            estimate_blurred = cv2.filter2D(
+                estimate, cv2.CV_32F, psf, borderType=cv2.BORDER_REFLECT
+            )
+            ratio = observed / np.maximum(estimate_blurred, 1e-12)
+            correlation = fftconvolve(ratio * edge_mask, estimate[::-1, ::-1], mode="full")
+            sensitivity = fftconvolve(
+                edge_mask.astype(np.float32), estimate[::-1, ::-1], mode="full"
+            )
+            radius = psf.shape[0] // 2
+            center_y = estimate.shape[0] - 1
+            center_x = estimate.shape[1] - 1
+            updated_psf = correlation[
+                center_y - radius:center_y + radius + 1,
+                center_x - radius:center_x + radius + 1,
+            ]
+            sensitivity = sensitivity[
+                center_y - radius:center_y + radius + 1,
+                center_x - radius:center_x + radius + 1,
+            ]
+            updated_psf = np.maximum(updated_psf / np.maximum(sensitivity, 1e-12), 1e-8)
+            updated_psf *= psf
+            weak = updated_psf < np.quantile(updated_psf, 0.25)
+            updated_psf[weak] *= max(1.0 - sparsity_weight, 0.0)
+            updated_psf /= max(float(updated_psf.sum()), 1e-12)
+            psf = (1.0 - sparsity_weight) * psf + sparsity_weight * updated_psf
+            psf = np.maximum(psf, 1e-8)
+            psf /= psf.sum()
+        return np.ascontiguousarray(psf)
 
     @staticmethod
     def blind_deconvolution(
@@ -187,6 +282,12 @@ class ManualImageProcessor:
         progress_callback: Callable[[np.ndarray, int], None] | None = None,
         image_damping: float = 1.0,
         psf_damping: float = 0.05,
+        tv_weight: float = 0.02,
+        l0_weight: float = 0.02,
+        psf_support: int = 0,
+        multiscale_levels: int = 1,
+        sparsity_weight: float = 0.02,
+        prior_weight: float = 0.35,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Alternate Richardson-Lucy updates for the image and PSF."""
         values = np.asarray(image, dtype=np.float32)
@@ -211,74 +312,186 @@ class ManualImageProcessor:
             raise ValueError("Initial PSF has no energy")
         psf /= total
         observed = np.clip(values / 255.0, 0, 1)
-        estimate = observed.copy()
+        initial_psf_prior = psf.copy()
 
-        def preview_psf() -> np.ndarray:
-            preview_peak = float(psf.max())
+        def preview_psf(current_psf: np.ndarray) -> np.ndarray:
+            preview_peak = float(current_psf.max())
             if not np.isfinite(preview_peak) or preview_peak <= epsilon:
                 raise ValueError("Estimated PSF has no positive peak")
             return np.ascontiguousarray(
-                np.clip(psf / preview_peak * 255, 0, 255).astype(np.uint8)
+                np.clip(current_psf / preview_peak * 255, 0, 255).astype(np.uint8)
             )
 
         if progress_callback is not None:
-            progress_callback(preview_psf(), 0)
+            progress_callback(preview_psf(psf), 0)
 
         def convolve(source: np.ndarray, kernel: np.ndarray) -> np.ndarray:
             return cv2.filter2D(
                 source,
                 cv2.CV_32F,
                 kernel,
-                borderType=cv2.BORDER_REPLICATE,
+                borderType=cv2.BORDER_REFLECT,
             )
 
         def flip(kernel: np.ndarray) -> np.ndarray:
             return kernel[::-1, ::-1]
 
-        for step in range(1, iterations + 1):
-            estimate_blurred = np.maximum(convolve(estimate, psf), epsilon)
-            updated_estimate = estimate * convolve(
-                observed / estimate_blurred, flip(psf)
-            )
-            estimate = (
-                (1.0 - image_damping) * estimate
-                + image_damping * updated_estimate
-            )
-            estimate = np.clip(estimate, 0, 1)
-            if step % update_interval == 0:
-                ratio = observed / np.maximum(convolve(estimate, psf), epsilon)
-                radius = psf.shape[0] // 2
-                correlation = fftconvolve(
-                    ratio, estimate[::-1, ::-1], mode="full"
-                )
-                sensitivity = fftconvolve(
-                    np.ones_like(observed), estimate[::-1, ::-1], mode="full"
-                )
-                center_y, center_x = estimate.shape[0] - 1, estimate.shape[1] - 1
-                updated = correlation[
-                    center_y - radius : center_y + radius + 1,
-                    center_x - radius : center_x + radius + 1,
-                ]
-                sensitivity = sensitivity[
-                    center_y - radius : center_y + radius + 1,
-                    center_x - radius : center_x + radius + 1,
-                ]
-                updated /= np.maximum(sensitivity, epsilon)
-                updated *= psf
-                updated = np.maximum(updated, 0)
-                updated_total = float(updated.sum())
-                if np.isfinite(updated_total) and updated_total > epsilon:
-                    updated /= updated_total
-                    psf = (
-                        (1.0 - psf_damping) * psf
-                        + psf_damping * updated
-                    )
-                    psf /= np.maximum(psf.sum(), epsilon)
-            if progress_callback is not None:
-                progress_callback(preview_psf(), step)
+        def tv_regularize(source: np.ndarray) -> np.ndarray:
+            if tv_weight <= 0:
+                return source
+            laplacian = cv2.Laplacian(source, cv2.CV_32F, ksize=3)
+            return np.clip(source - tv_weight * laplacian, 0, 1)
 
+        def l0_regularize(source: np.ndarray) -> np.ndarray:
+            if l0_weight <= 0:
+                return source
+            gy = np.abs(np.diff(source, axis=0, prepend=source[:1, :]))
+            gx = np.abs(np.diff(source, axis=1, prepend=source[:, :1]))
+            gradient = np.maximum(gx, gy)
+            threshold = np.quantile(gradient, 0.75)
+            strong = gradient >= threshold
+            if strong.any():
+                source = np.where(strong, source, source * (1.0 - l0_weight))
+            return np.clip(source, 0, 1)
+
+        def apply_psf_support(kernel: np.ndarray) -> np.ndarray:
+            if psf_support <= 0:
+                return kernel
+            radius = psf_support // 2
+            center = kernel.shape[0] // 2
+            mask = np.zeros_like(kernel)
+            y, x = np.ogrid[:kernel.shape[0], :kernel.shape[1]]
+            mask[(x - center) ** 2 + (y - center) ** 2 <= radius * radius] = 1
+            kernel *= mask
+            kernel = np.maximum(kernel, epsilon)
+            kernel /= np.maximum(kernel.sum(), epsilon)
+            return kernel
+
+        def run_core(observed_level: np.ndarray, psf_level: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+            estimate_level = observed_level.copy()
+            level_psf = apply_psf_support(psf_level)
+            level_iterations = max(1, iterations // max(multiscale_levels, 1))
+
+            for step in range(1, level_iterations + 1):
+                estimate_blurred = np.maximum(convolve(estimate_level, level_psf), epsilon)
+                updated_estimate = estimate_level * convolve(
+                    observed_level / estimate_blurred, flip(level_psf)
+                )
+                estimate_level = (
+                    (1.0 - image_damping) * estimate_level
+                    + image_damping * updated_estimate
+                )
+                estimate_level = tv_regularize(estimate_level)
+                estimate_level = l0_regularize(estimate_level)
+
+                if step % update_interval == 0:
+                    ratio = observed_level / np.maximum(
+                        convolve(estimate_level, level_psf), epsilon
+                    )
+                    radius = level_psf.shape[0] // 2
+                    correlation = fftconvolve(
+                        ratio, estimate_level[::-1, ::-1], mode="full"
+                    )
+                    sensitivity = fftconvolve(
+                        np.ones_like(observed_level),
+                        estimate_level[::-1, ::-1],
+                        mode="full",
+                    )
+                    center_y = estimate_level.shape[0] - 1
+                    center_x = estimate_level.shape[1] - 1
+                    updated = correlation[
+                        center_y - radius:center_y + radius + 1,
+                        center_x - radius:center_x + radius + 1,
+                    ]
+                    sensitivity = sensitivity[
+                        center_y - radius:center_y + radius + 1,
+                        center_x - radius:center_x + radius + 1,
+                    ]
+                    updated /= np.maximum(sensitivity, epsilon)
+                    updated *= level_psf
+                    updated = np.maximum(updated, epsilon)
+                    updated_total = float(updated.sum())
+                    if np.isfinite(updated_total) and updated_total > epsilon:
+                        updated /= updated_total
+                        level_psf = (
+                            (1.0 - psf_damping) * level_psf
+                            + psf_damping * updated
+                        )
+                        prior = cv2.resize(
+                            initial_psf_prior,
+                            (level_psf.shape[1], level_psf.shape[0]),
+                            interpolation=cv2.INTER_AREA,
+                        )
+                        prior = np.maximum(prior, epsilon)
+                        prior /= prior.sum()
+                        level_psf = (
+                            (1.0 - prior_weight) * level_psf
+                            + prior_weight * prior
+                        )
+                        weak_threshold = np.quantile(level_psf, 0.65)
+                        level_psf[level_psf < weak_threshold] *= 1.0 - sparsity_weight
+                        level_psf = apply_psf_support(level_psf)
+            return estimate_level, level_psf
+
+        levels = max(1, int(multiscale_levels))
+        current_observed = observed
+        current_psf = psf
+        estimate = observed.copy()
+
+        for level in range(levels - 1, -1, -1):
+            scale = 2 ** level
+            if scale > 1:
+                level_height = max(16, int(round(observed.shape[0] / scale)))
+                level_width = max(16, int(round(observed.shape[1] / scale)))
+                current_observed = cv2.resize(
+                    observed,
+                    (level_width, level_height),
+                    interpolation=cv2.INTER_AREA,
+                )
+                psf_size = max(3, psf.shape[0] // scale)
+                psf_size += 1 - psf_size % 2
+                current_psf = cv2.resize(
+                    psf,
+                    (psf_size, psf_size),
+                    interpolation=cv2.INTER_AREA,
+                )
+                current_psf = np.maximum(current_psf, epsilon)
+                current_psf /= current_psf.sum()
+                if level + 1 < levels:
+                    estimate = cv2.resize(
+                        estimate,
+                        (level_width, level_height),
+                        interpolation=cv2.INTER_CUBIC,
+                    )
+            else:
+                current_observed = observed
+                if psf.shape[0] != initial_psf_prior.shape[0]:
+                    current_psf = cv2.resize(
+                        psf,
+                        (initial_psf_prior.shape[1], initial_psf_prior.shape[0]),
+                        interpolation=cv2.INTER_AREA,
+                    )
+                    current_psf = np.maximum(current_psf, epsilon)
+                    current_psf /= current_psf.sum()
+                else:
+                    current_psf = psf
+
+                estimate = cv2.resize(
+                    estimate,
+                    (observed.shape[1], observed.shape[0]),
+                    interpolation=cv2.INTER_CUBIC,
+                )
+
+            estimate, current_psf = run_core(current_observed, current_psf)
+            psf = current_psf
+
+            if progress_callback is not None:
+                progress_callback(preview_psf(psf), levels - level)
+
+        psf = apply_psf_support(psf)
+        estimate = np.clip(estimate, 0, 1)
         restored = np.clip(estimate * 255, 0, 255).astype(np.uint8)
-        preview = preview_psf()
+        preview = preview_psf(psf)
         return np.ascontiguousarray(restored), np.ascontiguousarray(preview)
 
     @staticmethod

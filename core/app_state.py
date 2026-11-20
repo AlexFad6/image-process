@@ -89,7 +89,15 @@ class RestorationParams:
     blind_iterations: int = 50
     blind_update_interval: int = 2
     blind_epsilon: float = 1e-6
+    blind_tv_weight: float = 0.02
+    blind_l0_weight: float = 0.02
+    blind_psf_support: int = 0
+    blind_multiscale_levels: int = 3
+    blind_initialization: str = "selected_psf"
+    blind_sparsity_weight: float = 0.02
+    wiener_noise_mode: str = "noise_ratio"
     wiener_noise_ratio: float = 0.01
+    wiener_noise_std: float = 5.0
 
 
 @dataclass
