@@ -86,30 +86,6 @@ class LibraryImageProcessor:
         return image.astype(np.uint8, copy=False)
 
     @staticmethod
-    def generate_psf(*args, **kwargs) -> np.ndarray:
-        from .image_processor_manual import ManualImageProcessor
-
-        return ManualImageProcessor.generate_psf(*args, **kwargs)
-
-    @staticmethod
-    def generate_psf_kernel(*args, **kwargs) -> np.ndarray:
-        from .image_processor_manual import ManualImageProcessor
-
-        return ManualImageProcessor.generate_psf_kernel(*args, **kwargs)
-
-    @staticmethod
-    def apply_psf(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
-        from .image_processor_manual import ManualImageProcessor
-
-        return ManualImageProcessor.apply_psf(image, kernel)
-
-    @staticmethod
-    def blind_deconvolution(*args, **kwargs) -> tuple[np.ndarray, np.ndarray]:
-        from .image_processor_manual import ManualImageProcessor
-
-        return ManualImageProcessor.blind_deconvolution(*args, **kwargs)
-
-    @staticmethod
     def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
         """将值域线性映射到[0,255]"""
         """Normalize the value range to [0, 255]"""
@@ -199,20 +175,6 @@ class LibraryImageProcessor:
         flattened = windows.reshape(windows.shape[:2] + (size * size,))
         result = np.partition(flattened, index, axis=-1)[..., index]
         return np.ascontiguousarray(result)
-
-    @staticmethod
-    def geometric_mean_filter(image: np.ndarray, size: int) -> np.ndarray:
-        """Apply geometric mean filtering."""
-        from .image_processor_manual import ManualImageProcessor
-
-        return ManualImageProcessor.geometric_mean_filter(image, size)
-
-    @staticmethod
-    def adaptive_median_filter(image: np.ndarray, max_size: int) -> np.ndarray:
-        """Apply adaptive median filtering with progressively larger windows."""
-        from .image_processor_manual import ManualImageProcessor
-
-        return ManualImageProcessor.adaptive_median_filter(image, max_size)
 
     @staticmethod
     def bilateral_filter(
