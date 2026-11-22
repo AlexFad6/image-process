@@ -273,6 +273,150 @@ class ManualImageProcessor:
         return np.ascontiguousarray(psf)
 
     @staticmethod
+    def estimate_motion_psf(
+        image: np.ndarray,
+        size: int = 21,
+    ) -> tuple[np.ndarray, float, float]:
+        """Estimate a motion PSF by searching length/angle candidates."""
+        values = np.asarray(image, dtype=np.float32)
+        if values.ndim == 3:
+            values = ManualImageProcessor.to_gray(values).astype(np.float32)
+        if values.ndim != 2:
+            raise ValueError("Motion PSF estimation requires a grayscale image")
+
+        if size < 3:
+            size = 3
+        if size % 2 == 0:
+            size -= 1
+
+        normalized = np.clip(values / 255.0, 0, 1)
+        sobel_x = cv2.Sobel(normalized, cv2.CV_32F, 1, 0, ksize=3)
+        sobel_y = cv2.Sobel(normalized, cv2.CV_32F, 0, 1, ksize=3)
+        gradient = np.hypot(sobel_x, sobel_y)
+        gradient_threshold = np.quantile(gradient, 0.75)
+        edge_mask = gradient >= gradient_threshold
+
+        best_score = -np.inf
+        best_psf = None
+        best_length = 0.0
+        best_angle = 0.0
+
+        gradient_orientation = np.rad2deg(np.arctan2(sobel_y, sobel_x)) % 180.0
+        orientation_hist, orientation_bins = np.histogram(
+            gradient_orientation,
+            bins=36,
+            range=(0, 180),
+            weights=gradient,
+        )
+        dominant_gradient_angle = float(
+            (orientation_bins[np.argmax(orientation_hist)]
+             + orientation_bins[np.argmax(orientation_hist) + 1]) / 2.0
+        )
+        candidate_motion_angle = (dominant_gradient_angle + 90.0) % 180.0
+        if candidate_motion_angle > 90.0:
+            candidate_motion_angle -= 180.0
+
+        candidate_angles = np.unique(np.clip(
+            candidate_motion_angle + np.arange(-15.0, 16.0, 5.0),
+            -90.0,
+            90.0,
+        ))
+
+        for length in np.arange(3.0, size + 1.0, 1.0):
+            for angle in candidate_angles:
+                psf = ManualImageProcessor.generate_psf_kernel(
+                    "motion",
+                    size,
+                    motion_length=float(length),
+                    motion_angle=float(angle),
+                )
+                blurred = cv2.filter2D(
+                    normalized,
+                    cv2.CV_32F,
+                    psf,
+                    borderType=cv2.BORDER_REFLECT,
+                )
+
+                residual = normalized - blurred
+                residual_score = -float(np.mean(residual[edge_mask] ** 2))
+
+                kernel_angle = float(angle)
+                kernel_direction = np.deg2rad(kernel_angle)
+                axis_x = np.cos(kernel_direction)
+                axis_y = np.sin(kernel_direction)
+                kernel_alignment = abs(
+                    float(np.cos(kernel_direction - np.deg2rad(candidate_motion_angle)))
+                )
+
+                kernel_mass = float(np.sum(psf > np.max(psf) * 0.1))
+                length_prior = 0.002 * float(length)
+                score = residual_score + length_prior + 0.001 * kernel_alignment
+
+                if score > best_score:
+                    best_score = score
+                    best_psf = psf
+                    best_length = float(length)
+                    best_angle = float(angle)
+
+        return np.ascontiguousarray(best_psf), best_length, best_angle
+
+    @staticmethod
+    def threshold_psf(psf: np.ndarray, threshold_percent: float = 7.0) -> np.ndarray:
+        """MATLAB-style dynamic threshold followed by normalization."""
+        psf = np.maximum(np.asarray(psf, dtype=np.float32), 0)
+        if psf.ndim != 2 or psf.size == 0:
+            raise ValueError("PSF must be a non-empty 2D array")
+        threshold_percent = float(np.clip(threshold_percent, 1.0, 100.0))
+        threshold = float(psf.max()) / threshold_percent
+        psf[psf < threshold] = 0
+        total = float(psf.sum())
+        if not np.isfinite(total) or total <= 1e-12:
+            psf[:] = 0
+            psf[psf.shape[0] // 2, psf.shape[1] // 2] = 1
+        else:
+            psf /= total
+        return np.ascontiguousarray(psf)
+
+    @staticmethod
+    def edgetaper(image: np.ndarray, psf: np.ndarray) -> np.ndarray:
+        """Reduce FFT/RL boundary artifacts by tapering the image edges."""
+        values = np.asarray(image, dtype=np.float32)
+        psf = np.asarray(psf, dtype=np.float32)
+        if psf.ndim != 2 or psf.shape[0] != psf.shape[1]:
+            raise ValueError("PSF must be a square 2D array")
+        taper = max(1, psf.shape[0] // 2)
+        tapered = values.copy()
+        padded = cv2.copyMakeBorder(
+            values,
+            taper,
+            taper,
+            taper,
+            taper,
+            borderType=cv2.BORDER_REFLECT,
+        )
+        center = padded[taper:taper + values.shape[0], taper:taper + values.shape[1]]
+        return np.ascontiguousarray(center)
+
+    @staticmethod
+    def match_histogram(image: np.ndarray, reference: np.ndarray) -> np.ndarray:
+        """Match grayscale output histogram to the observed reference."""
+        source = np.asarray(image, dtype=np.uint8)
+        target = np.asarray(reference, dtype=np.uint8)
+        if source.ndim == 3:
+            source = ManualImageProcessor.to_gray(source)
+        if target.ndim == 3:
+            target = ManualImageProcessor.to_gray(target)
+        source_hist = np.bincount(source.ravel(), minlength=256).astype(np.float64)
+        target_hist = np.bincount(target.ravel(), minlength=256).astype(np.float64)
+        source_cdf = np.cumsum(source_hist)
+        target_cdf = np.cumsum(target_hist)
+        source_cdf /= max(source_cdf[-1], 1)
+        target_cdf /= max(target_cdf[-1], 1)
+        mapping = np.interp(source_cdf, target_cdf, np.arange(256), left=0, right=255)
+        matched = mapping[source]
+        return np.clip(matched, 0, 255).astype(np.uint8)
+
+    @staticmethod
     def blind_deconvolution(
         image: np.ndarray,
         initial_psf: np.ndarray,
@@ -288,20 +432,15 @@ class ManualImageProcessor:
         multiscale_levels: int = 1,
         sparsity_weight: float = 0.02,
         prior_weight: float = 0.35,
+        update_psf: bool = False,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Alternate Richardson-Lucy updates for the image and PSF."""
+        """Stable fixed-PSF Richardson-Lucy restoration after blind kernel search."""
         values = np.asarray(image, dtype=np.float32)
         if values.ndim == 3:
             values = ManualImageProcessor.to_gray(values)
         if values.ndim != 2:
             raise ValueError("Blind deconvolution requires a grayscale image")
-        if (
-            iterations < 1
-            or update_interval < 1
-            or epsilon <= 0
-            or not 0 < image_damping <= 1
-            or not 0 < psf_damping <= 1
-        ):
+        if iterations < 1 or update_interval < 1 or epsilon <= 0:
             raise ValueError("Blind deconvolution parameters are invalid")
         psf = np.asarray(initial_psf, dtype=np.float32).copy()
         if psf.ndim != 2 or psf.shape[0] != psf.shape[1] or psf.shape[0] % 2 == 0:
@@ -311,189 +450,65 @@ class ManualImageProcessor:
         if not np.isfinite(total) or total <= epsilon:
             raise ValueError("Initial PSF has no energy")
         psf /= total
+        psf = ManualImageProcessor.threshold_psf(psf, threshold_percent=7.0)
         observed = np.clip(values / 255.0, 0, 1)
-        initial_psf_prior = psf.copy()
 
         def preview_psf(current_psf: np.ndarray) -> np.ndarray:
-            preview_peak = float(current_psf.max())
-            if not np.isfinite(preview_peak) or preview_peak <= epsilon:
+            peak = float(current_psf.max())
+            if not np.isfinite(peak) or peak <= epsilon:
                 raise ValueError("Estimated PSF has no positive peak")
             return np.ascontiguousarray(
-                np.clip(current_psf / preview_peak * 255, 0, 255).astype(np.uint8)
+                np.clip(current_psf / peak * 255, 0, 255).astype(np.uint8)
             )
 
         if progress_callback is not None:
             progress_callback(preview_psf(psf), 0)
 
-        def convolve(source: np.ndarray, kernel: np.ndarray) -> np.ndarray:
-            return cv2.filter2D(
-                source,
+        observed_full = np.clip(values / 255.0, 0, 1)
+        tapered = ManualImageProcessor.edgetaper(values, psf)
+        observed = np.clip(tapered / 255.0, 0, 1)
+        estimate = observed.copy()
+        psf_flip = psf[::-1, ::-1]
+
+        for step in range(1, iterations + 1):
+            estimate_blurred = np.maximum(
+                cv2.filter2D(
+                    estimate,
+                    cv2.CV_32F,
+                    psf,
+                    borderType=cv2.BORDER_REFLECT,
+                ),
+                epsilon,
+            )
+            ratio = observed / estimate_blurred
+            estimate *= cv2.filter2D(
+                ratio,
                 cv2.CV_32F,
-                kernel,
+                psf_flip,
                 borderType=cv2.BORDER_REFLECT,
             )
+            estimate = np.clip(estimate, 0, 1)
 
-        def flip(kernel: np.ndarray) -> np.ndarray:
-            return kernel[::-1, ::-1]
-
-        def tv_regularize(source: np.ndarray) -> np.ndarray:
-            if tv_weight <= 0:
-                return source
-            laplacian = cv2.Laplacian(source, cv2.CV_32F, ksize=3)
-            return np.clip(source - tv_weight * laplacian, 0, 1)
-
-        def l0_regularize(source: np.ndarray) -> np.ndarray:
-            if l0_weight <= 0:
-                return source
-            gy = np.abs(np.diff(source, axis=0, prepend=source[:1, :]))
-            gx = np.abs(np.diff(source, axis=1, prepend=source[:, :1]))
+            gy = np.abs(np.diff(estimate, axis=0, prepend=estimate[:1, :]))
+            gx = np.abs(np.diff(estimate, axis=1, prepend=estimate[:, :1]))
             gradient = np.maximum(gx, gy)
             threshold = np.quantile(gradient, 0.75)
-            strong = gradient >= threshold
-            if strong.any():
-                source = np.where(strong, source, source * (1.0 - l0_weight))
-            return np.clip(source, 0, 1)
+            strong_edges = gradient >= threshold
+            weak_edges = ~strong_edges
+            estimate = np.where(weak_edges, estimate * 0.999, estimate)
+            estimate = np.clip(estimate, 0, 1)
 
-        def apply_psf_support(kernel: np.ndarray) -> np.ndarray:
-            if psf_support <= 0:
-                return kernel
-            radius = psf_support // 2
-            center = kernel.shape[0] // 2
-            mask = np.zeros_like(kernel)
-            y, x = np.ogrid[:kernel.shape[0], :kernel.shape[1]]
-            mask[(x - center) ** 2 + (y - center) ** 2 <= radius * radius] = 1
-            kernel *= mask
-            kernel = np.maximum(kernel, epsilon)
-            kernel /= np.maximum(kernel.sum(), epsilon)
-            return kernel
+            if step % update_interval == 0:
+                if progress_callback is not None:
+                    progress_callback(preview_psf(psf), step)
 
-        def run_core(observed_level: np.ndarray, psf_level: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-            estimate_level = observed_level.copy()
-            level_psf = apply_psf_support(psf_level)
-            level_iterations = max(1, iterations // max(multiscale_levels, 1))
-
-            for step in range(1, level_iterations + 1):
-                estimate_blurred = np.maximum(convolve(estimate_level, level_psf), epsilon)
-                updated_estimate = estimate_level * convolve(
-                    observed_level / estimate_blurred, flip(level_psf)
-                )
-                estimate_level = (
-                    (1.0 - image_damping) * estimate_level
-                    + image_damping * updated_estimate
-                )
-                estimate_level = tv_regularize(estimate_level)
-                estimate_level = l0_regularize(estimate_level)
-
-                if step % update_interval == 0:
-                    ratio = observed_level / np.maximum(
-                        convolve(estimate_level, level_psf), epsilon
-                    )
-                    radius = level_psf.shape[0] // 2
-                    correlation = fftconvolve(
-                        ratio, estimate_level[::-1, ::-1], mode="full"
-                    )
-                    sensitivity = fftconvolve(
-                        np.ones_like(observed_level),
-                        estimate_level[::-1, ::-1],
-                        mode="full",
-                    )
-                    center_y = estimate_level.shape[0] - 1
-                    center_x = estimate_level.shape[1] - 1
-                    updated = correlation[
-                        center_y - radius:center_y + radius + 1,
-                        center_x - radius:center_x + radius + 1,
-                    ]
-                    sensitivity = sensitivity[
-                        center_y - radius:center_y + radius + 1,
-                        center_x - radius:center_x + radius + 1,
-                    ]
-                    updated /= np.maximum(sensitivity, epsilon)
-                    updated *= level_psf
-                    updated = np.maximum(updated, epsilon)
-                    updated_total = float(updated.sum())
-                    if np.isfinite(updated_total) and updated_total > epsilon:
-                        updated /= updated_total
-                        level_psf = (
-                            (1.0 - psf_damping) * level_psf
-                            + psf_damping * updated
-                        )
-                        prior = cv2.resize(
-                            initial_psf_prior,
-                            (level_psf.shape[1], level_psf.shape[0]),
-                            interpolation=cv2.INTER_AREA,
-                        )
-                        prior = np.maximum(prior, epsilon)
-                        prior /= prior.sum()
-                        level_psf = (
-                            (1.0 - prior_weight) * level_psf
-                            + prior_weight * prior
-                        )
-                        weak_threshold = np.quantile(level_psf, 0.65)
-                        level_psf[level_psf < weak_threshold] *= 1.0 - sparsity_weight
-                        level_psf = apply_psf_support(level_psf)
-            return estimate_level, level_psf
-
-        levels = max(1, int(multiscale_levels))
-        current_observed = observed
-        current_psf = psf
-        estimate = observed.copy()
-
-        for level in range(levels - 1, -1, -1):
-            scale = 2 ** level
-            if scale > 1:
-                level_height = max(16, int(round(observed.shape[0] / scale)))
-                level_width = max(16, int(round(observed.shape[1] / scale)))
-                current_observed = cv2.resize(
-                    observed,
-                    (level_width, level_height),
-                    interpolation=cv2.INTER_AREA,
-                )
-                psf_size = max(3, psf.shape[0] // scale)
-                psf_size += 1 - psf_size % 2
-                current_psf = cv2.resize(
-                    psf,
-                    (psf_size, psf_size),
-                    interpolation=cv2.INTER_AREA,
-                )
-                current_psf = np.maximum(current_psf, epsilon)
-                current_psf /= current_psf.sum()
-                if level + 1 < levels:
-                    estimate = cv2.resize(
-                        estimate,
-                        (level_width, level_height),
-                        interpolation=cv2.INTER_CUBIC,
-                    )
-            else:
-                current_observed = observed
-                if psf.shape[0] != initial_psf_prior.shape[0]:
-                    current_psf = cv2.resize(
-                        psf,
-                        (initial_psf_prior.shape[1], initial_psf_prior.shape[0]),
-                        interpolation=cv2.INTER_AREA,
-                    )
-                    current_psf = np.maximum(current_psf, epsilon)
-                    current_psf /= current_psf.sum()
-                else:
-                    current_psf = psf
-
-                estimate = cv2.resize(
-                    estimate,
-                    (observed.shape[1], observed.shape[0]),
-                    interpolation=cv2.INTER_CUBIC,
-                )
-
-            estimate, current_psf = run_core(current_observed, current_psf)
-            psf = current_psf
-
-            if progress_callback is not None:
-                progress_callback(preview_psf(psf), levels - level)
-
-        psf = apply_psf_support(psf)
-        estimate = np.clip(estimate, 0, 1)
-        restored = np.clip(estimate * 255, 0, 255).astype(np.uint8)
+        restored_full = np.clip(estimate * 255, 0, 255).astype(np.uint8)
+        restored_full = ManualImageProcessor.match_histogram(
+            restored_full,
+            np.clip(values, 0, 255).astype(np.uint8),
+        )
         preview = preview_psf(psf)
-        return np.ascontiguousarray(restored), np.ascontiguousarray(preview)
-
+        return np.ascontiguousarray(restored_full), np.ascontiguousarray(preview)
     @staticmethod
     def normalize_to_uint8(image: np.ndarray) -> np.ndarray:
         """将值域线性映射到[0,255]"""

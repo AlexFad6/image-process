@@ -204,25 +204,16 @@ class ProcessingWorker(QObject):
                     self.finished.emit(result, self.generation)
                     return
                 if params.mode == "blind_deconvolution":
-                    initial_psf = processor.generate_psf_kernel(
-                        params.psf_type,
-                        params.size,
-                        params.motion_length,
-                        params.motion_angle,
-                        params.defocus_radius,
-                        params.gaussian_sigma,
-                        params.turbulence_strength,
-                        params.diffraction_wavelength,
-                        params.diffraction_aperture,
+                    initial_psf, estimated_length, estimated_angle = processor.estimate_motion_psf(
+                        image,
+                        size=params.size,
                     )
                     if params.blind_initialization == "normalized_sparsity":
-                        initial_psf = processor.estimate_psf_by_normalized_sparsity(
-                            image,
-                            initial_psf,
-                            params.blind_sparsity_weight,
-                            iterations=8,
+                        estimated_psf, estimated_length, estimated_angle = (
+                            processor.estimate_motion_psf(image, size=params.size)
                         )
-                    result = processor.blind_deconvolution(
+                        initial_psf = estimated_psf
+                    restored, preview = processor.blind_deconvolution(
                         image,
                         initial_psf,
                         params.blind_iterations,
@@ -236,8 +227,9 @@ class ProcessingWorker(QObject):
                         psf_support=params.blind_psf_support,
                         multiscale_levels=params.blind_multiscale_levels,
                         sparsity_weight=params.blind_sparsity_weight,
+                        update_psf=False,
                     )
-                    self.finished.emit(result, self.generation)
+                    self.finished.emit(("blind", restored, preview), self.generation)
                     return
                 kernel = processor.generate_psf_kernel(
                     params.psf_type, params.size,
@@ -441,6 +433,7 @@ class MainWindow(QMainWindow):
         self.params.spatialChanged.connect(self.apply_spatial_params)
         self.params.geometryChanged.connect(self.apply_geometry_params)
         self.params.restorationChanged.connect(self.apply_restoration_params)
+        self.params.degradationRequested.connect(self.start_degradation)
         self.params.blindDeconvolutionRequested.connect(
             self.start_blind_deconvolution
         )
@@ -927,6 +920,16 @@ class MainWindow(QMainWindow):
             "restoration", (self.processor, self.state.source.copy(), params)
         )
 
+    def start_degradation(self) -> None:
+        params = self.params.restoration_params()
+        if params.mode != "degradation" or self.state.source is None:
+            return
+        self.state.restoration_params = params
+        self._processing_generation += 1
+        self._start_processing(
+            "restoration", (self.processor, self.state.source.copy(), params)
+        )
+
     def start_wiener_filter(self) -> None:
         params = self.params.restoration_params()
         if params.mode != "wiener" or self.state.source is None:
@@ -1040,14 +1043,27 @@ class MainWindow(QMainWindow):
             self.state.result_phase_spectrum_uint8 = None
             self.display_mode = "original"
         elif operation == "restoration":
-            if self.state.restoration_params.mode == "blind_deconvolution":
-                image, preview = result
+            if (
+                isinstance(result, tuple)
+                and len(result) == 3
+                and result[0] == "blind"
+            ):
+                _, image, preview = result
                 self.params.set_blind_psf_preview(
                     preview, self.state.restoration_params.blind_iterations
                 )
+            elif (
+                isinstance(result, tuple)
+                and len(result) == 2
+                and result[0] is not None
+                and isinstance(result[0], np.ndarray)
+                and result[1] is not None
+                and isinstance(result[1], np.ndarray)
+            ):
+                image, preview = result
+                self.params.set_restoration_preview(preview)
             else:
                 image = result
-                preview = None
                 if self.state.restoration_params.mode == "wiener":
                     kernel = self.processor.generate_psf_kernel(
                         self.state.restoration_params.psf_type,
@@ -1061,7 +1077,6 @@ class MainWindow(QMainWindow):
                         self.state.restoration_params.diffraction_aperture,
                     )
                     preview = (kernel / kernel.max() * 255).astype(np.uint8)
-                if preview is not None:
                     self.params.set_restoration_preview(preview)
             self.state.result = image
             self.state.result_frequency_data = None

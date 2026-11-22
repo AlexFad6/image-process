@@ -79,8 +79,8 @@ class RestorationParams:
     mode: str = "degradation"
     psf_type: str = "motion"
     size: int = 21
-    motion_length: float = 15.0
-    motion_angle: float = 0.0
+    motion_length: float = 13.0
+    motion_angle: float = 45.0
     defocus_radius: float = 5.0
     gaussian_sigma: float = 3.0
     turbulence_strength: float = 0.0025
